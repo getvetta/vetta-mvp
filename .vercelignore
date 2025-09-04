@@ -1,0 +1,2 @@
+# Keep Deno-style edge functions out of the Next build step
+supabase/functions/

@@ -1,0 +1,28 @@
+/* styles/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Smooth scrolling + better defaults */
+html {
+  scroll-behavior: smooth;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Font smoothing for crisper UI */
+html,
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+/* Ensure full height */
+body {
+  min-height: 100vh;
+}
+
+/* Dark mode handled via Tailwind's `dark:` classes */
