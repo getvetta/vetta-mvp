@@ -40,4 +40,3 @@ supabase/.temp
 
 # Optional: ignore coverage reports
 coverage/
-.vercel
