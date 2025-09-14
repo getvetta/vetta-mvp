@@ -35,17 +35,24 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 
                 {/* Logo + Name */}
                 <Link href="/" className="flex items-center gap-2">
-                  <Image
-                    src="/images/vetta-logo.png"
-                    alt="Vetta Logo"
-                    width={32}
-                    height={32}
-                    className="rounded-full"
-                    priority
-                  />
-                  <span className="text-lg sm:text-xl font-bold text-blue-700 dark:text-blue-300">
-                    Vetta
-                  </span>
+                  {/* Logo with fallback */}
+                  <div className="flex items-center gap-2">
+                    <Image
+                      src="/vetta-logo.png"   // ✅ now points to public root
+                      alt="Vetta Logo"
+                      width={32}
+                      height={32}
+                      className="rounded-full"
+                      priority
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = 'none'; // hide broken image
+                      }}
+                    />
+                    <span className="text-lg sm:text-xl font-bold text-blue-700 dark:text-blue-300">
+                      Vetta
+                    </span>
+                  </div>
                 </Link>
 
                 {/* Auth buttons */}

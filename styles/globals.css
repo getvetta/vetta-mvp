@@ -26,3 +26,11 @@ body {
 }
 
 /* Dark mode handled via Tailwind's `dark:` classes */
+
+/* Custom utilities */
+@layer utilities {
+  /* Aspect-ratio plugin: responsive videos/images */
+  .responsive-embed {
+    @apply aspect-video w-full rounded-lg overflow-hidden;
+  }
+}

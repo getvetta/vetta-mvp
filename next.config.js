@@ -1,23 +1,21 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true, 
-
-  swcMinify: true,
-
+  reactStrictMode: true,
 
   images: {
-    domains: [
-      "ftrxfldibfjksmnrprgx.supabase.co", // Supabase storage bucket
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "ftrxfldibfjksmnrprgx.supabase.co",
+      },
     ],
-    formats: ["image/avif", "image/webp"], // modern formats for better performance
+    formats: ["image/avif", "image/webp"],
   },
 
-  
   experimental: {
-    typedRoutes: true, // safer routing with TypeScript
+    typedRoutes: true,
   },
 
-  
   output: "standalone",
 };
 
