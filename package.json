@@ -28,11 +28,8 @@
     "autoprefixer": "^10.4.19",
     "eslint": "^9.39.3",
     "eslint-config-next": "^15.5.12",
-    "eslint-plugin-react": "^7.37.5",
-    "globals": "^17.3.0",
     "postcss": "^8.4.41",
-    "typescript": "^5.5.4",
-    "typescript-eslint": "^8.56.0"
+    "typescript": "^5.5.4"
   },
   "engines": {
     "node": "20.x",
