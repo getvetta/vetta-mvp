@@ -1,24 +1,47 @@
+// app/api/create-dealer/route.ts
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "@/utils/supabaseAdmin";
 
 export async function POST(req: Request) {
   try {
-    const { id, email } = await req.json();
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const body = await req.json();
+    if (!body?.id || !body?.email) {
+      return NextResponse.json(
+        { error: 'Missing "id" and "email"' },
+        { status: 400 }
+      );
+    }
 
-    const { data, error } = await supabase
+    const { id, email } = body;
+
+    // Check existing dealer
+    const { data: existing } = await supabaseAdmin
       .from("dealers")
-      .insert([{ user_id: id, contact_email: email }])
+      .select("*")
+      .eq("user_id", id)
+      .maybeSingle();
+
+    if (existing) {
+      return NextResponse.json({ ok: true, dealer: existing });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("dealers")
+      .insert([
+        {
+          user_id: id,
+          contact_email: email,
+          created_at: new Date().toISOString(),
+        },
+      ])
       .select()
       .single();
 
     if (error) throw error;
 
-    return NextResponse.json({ dealer: data });
-  } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 400 });
+    return NextResponse.json({ ok: true, dealer: data });
+  } catch (err: any) {
+    console.error("create-dealer error:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

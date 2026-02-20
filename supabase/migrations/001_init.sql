@@ -1,81 +1,52 @@
--- Extensions (for UUIDs if needed)
+-- 001_init.sql
+
+-- Extensions
 create extension if not exists "pgcrypto";
 
--- assessments table
+-- DEALERS (one row per dealer account)
+create table if not exists public.dealers (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  user_id uuid unique, -- maps to auth.users.id
+  name text,
+  email text,
+  is_active boolean not null default true
+);
+
+-- ASSESSMENTS (one row per customer assessment)
 create table if not exists public.assessments (
   id uuid primary key default gen_random_uuid(),
-  dealer_id text not null,
-  answers jsonb not null,
-  risk text not null check (risk in ('low','medium','high')),
-  reasoning text,
-  created_at timestamp with time zone default now()
+  created_at timestamptz not null default now(),
+  dealer_id uuid references public.dealers(id) on delete set null,
+  customer_name text,
+  customer_phone text,
+  status text not null default 'started', -- started|completed
+  flow text not null default 'standard', -- standard|ai
+  answers jsonb not null default '[]'::jsonb, -- [{role,content,ts}...] or QA list
+  risk_score text, -- low|medium|high
+  reasoning text
 );
 
--- assessment events
-create table if not exists public.assessment_events (
-  id uuid primary key default gen_random_uuid(),
-  dealer_id text not null,
-  event_type text not null check (event_type in ('scanned','started','completed')),
-  created_at timestamp with time zone default now()
-);
-
--- custom questions
+-- CUSTOM QUESTIONS (dealer-defined questions)
 create table if not exists public.custom_questions (
   id uuid primary key default gen_random_uuid(),
-  dealer_id text not null,
+  created_at timestamptz not null default now(),
+  dealer_id uuid not null references public.dealers(id) on delete cascade,
   question text not null,
-  created_at timestamp with time zone default now()
+  is_active boolean not null default true,
+  sort_order int not null default 100
 );
 
--- dealer settings
-create table if not exists public.dealer_settings (
-  dealer_id text primary key,
-  logo_url text,
-  theme_color text default '#1E3A8A',
-  contact_email text,
-  created_at timestamp with time zone default now()
-);
+-- Helpful indexes
+create index if not exists idx_assessments_dealer_id on public.assessments(dealer_id);
+create index if not exists idx_custom_questions_dealer_id on public.custom_questions(dealer_id);
 
--- Row Level Security
-alter table public.assessments enable row level security;
-alter table public.assessment_events enable row level security;
-alter table public.custom_questions enable row level security;
-alter table public.dealer_settings enable row level security;
-
--- RLS Policies (read/write own rows by dealer_id via supabaseAdmin on server or anon with eq dealer_id)
--- For server routes using service role, RLS is bypassed (OK). For client inserts, create permissive policies if desired.
-
--- Example: allow read assessments by dealer_id (if using anon client on dashboard, filtered server-side is safer)
-create policy "read own assessments"
-on public.assessments for select
-using (true);
-
-create policy "insert assessments (public via server)"
-on public.assessments for insert
-with check (true);
-
-create policy "read events"
-on public.assessment_events for select
-using (true);
-
-create policy "insert events"
-on public.assessment_events for insert
-with check (true);
-
-create policy "read custom questions"
-on public.custom_questions for select
-using (true);
-
-create policy "modify custom questions"
-on public.custom_questions for all
-using (true)
-with check (true);
-
-create policy "read dealer settings"
-on public.dealer_settings for select
-using (true);
-
-create policy "upsert dealer settings"
-on public.dealer_settings for all
-using (true)
-with check (true);
+-- NOTES:
+-- If you already have tables, you may need ALTER TABLE instead.
+-- If "assessments" exists but is missing columns:
+-- alter table public.assessments add column if not exists flow text not null default 'standard';
+-- alter table public.assessments add column if not exists answers jsonb not null default '[]'::jsonb;
+-- alter table public.assessments add column if not exists customer_name text;
+-- alter table public.assessments add column if not exists customer_phone text;
+-- alter table public.assessments add column if not exists risk_score text;
+-- alter table public.assessments add column if not exists reasoning text;

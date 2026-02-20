@@ -1,48 +1,73 @@
-import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
-import { supabaseAdmin } from '@/utils/supabaseAdmin';
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "@/utils/supabaseAdmin";
 
-export async function GET() {
-  const { userId } = auth();
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+async function getUser(req: Request) {
+  const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) return null;
 
-  const dealer_id = userId;
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) return null;
 
-  const { data: scans } = await supabaseAdmin
-    .from('assessment_events')
-    .select('event_type')
-    .eq('dealer_id', dealer_id);
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { global: { headers: { Authorization: `Bearer ${token}` } } }
+  );
 
-  const qr_scans = scans?.filter(e => e.event_type === 'scanned').length ?? 0;
-  const assessments_started = scans?.filter(e => e.event_type === 'started').length ?? 0;
-  const completed = scans?.filter(e => e.event_type === 'completed').length ?? 0;
-  const drop_offs = Math.max(assessments_started - completed, 0);
-
-  const { data: recents } = await supabaseAdmin
-    .from('assessments')
-    .select('id, risk, answers')
-    .eq('dealer_id', dealer_id)
-    .order('created_at', { ascending: false })
-    .limit(10);
-
-  return NextResponse.json({
-    qr_scans, assessments_started, completed, drop_offs,
-    recent_assessments: recents ?? []
-  });
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data?.user) return null;
+  return data.user;
 }
 
-// Optional POST for public assessment save
-export async function POST(req: Request) {
-  const body = await req.json().catch(() => null);
-  if (!body) return NextResponse.json({ error: 'Bad request' }, { status: 400 });
+async function getDealerIdForUser(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("dealer_id")
+    .eq("id", userId)
+    .maybeSingle();
 
-  if (body.action === 'save_assessment') {
-    const { dealer_id, answers, risk, reasoning } = body;
-    if (!dealer_id || !answers || !risk) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
-    const { error } = await supabaseAdmin.from('assessments').insert([{ dealer_id, answers, risk, reasoning }]);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ ok: true });
-  }
+  if (error) return { dealerId: null as string | null, error: error.message };
+  const dealerId = (data?.dealer_id as string | null) ?? null;
+  if (!dealerId) return { dealerId: null, error: "profiles.dealer_id missing for this user" };
+  return { dealerId, error: null as string | null };
+}
 
-  return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
+export async function GET(req: Request) {
+  const user = await getUser(req);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { dealerId, error: dealerErr } = await getDealerIdForUser(user.id);
+  if (!dealerId) return NextResponse.json({ error: dealerErr || "Dealer not linked" }, { status: 400 });
+
+  // events
+  const { data: events, error: eventsErr } = await supabaseAdmin
+    .from("assessment_events")
+    .select("event_type")
+    .eq("dealer_id", dealerId);
+
+  if (eventsErr) console.error("Dashboard events error:", eventsErr);
+
+  const qr_scans = events?.filter((e) => e.event_type === "scanned").length ?? 0;
+  const assessments_started = events?.filter((e) => e.event_type === "started").length ?? 0;
+  const completed = events?.filter((e) => e.event_type === "completed").length ?? 0;
+  const drop_offs = Math.max(assessments_started - completed, 0);
+
+  // recents
+  const { data: recents, error: recentsErr } = await supabaseAdmin
+    .from("assessments")
+    .select("id, created_at, customer_name, customer_phone, status, risk_score")
+    .eq("dealer_id", dealerId)
+    .order("created_at", { ascending: false })
+    .limit(25);
+
+  if (recentsErr) console.error("Dashboard recents error:", recentsErr);
+
+  return NextResponse.json({
+    qr_scans,
+    assessments_started,
+    completed,
+    drop_offs,
+    recent_assessments: recents ?? [],
+  });
 }

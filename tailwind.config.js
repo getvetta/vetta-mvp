@@ -1,37 +1,41 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: "class",
   content: [
-    "./app/**/*.{js,ts,jsx,tsx}",
-    "./components/**/*.{js,ts,jsx,tsx}",
-    "./lib/**/*.{js,ts,jsx,tsx}",
-    "./pages/**/*.{js,ts,jsx,tsx}", // ✅ covers /pages if used
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./utils/**/*.{js,ts,jsx,tsx,mdx}",
+    "./styles/**/*.css",
   ],
-  darkMode: "class", // ✅ controlled by ThemeToggle
   theme: {
     extend: {
+      fontFamily: {
+        // ✅ Ostrich-like vibe (we’ll set --font-display in layout)
+        display: ["var(--font-display)", "system-ui", "sans-serif"],
+      },
       colors: {
         brand: {
-          DEFAULT: "#1E3A8A", // Main Vetta blue
-          light: "#3B82F6",   // lighter accent
-          dark: "#1E40AF",    // darker variant
+          50: "#eff6ff",
+          100: "#dbeafe",
+          200: "#bfdbfe",
+          300: "#93c5fd",
+          400: "#60a5fa",
+          500: "#3b82f6",
+          600: "#2563eb",
+          700: "#1d4ed8",
+          800: "#1e40af",
+          900: "#1e3a8a",
         },
       },
-      borderRadius: {
-        "2xl": "1rem",
-        "3xl": "1.5rem",
-      },
       boxShadow: {
-        card: "0 4px 20px rgba(0,0,0,0.1)",
-        soft: "0 2px 10px rgba(0,0,0,0.08)",
+        soft: "0 10px 30px rgba(0,0,0,0.08)",
       },
-      screens: {
-        "xs": "480px", // ✅ extra-small devices
+      borderRadius: {
+        xl: "0.9rem",
+        "2xl": "1.25rem",
       },
     },
   },
-  plugins: [
-    require("@tailwindcss/forms"),       // ✅ better form defaults
-    require("@tailwindcss/typography"),  // ✅ prose styling
-    require("@tailwindcss/aspect-ratio") // ✅ responsive embeds/images
-  ],
+  plugins: [],
 };

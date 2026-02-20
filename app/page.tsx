@@ -1,64 +1,73 @@
-'use client';
+"use client";
 
-import Image from "next/image";
-import { SignInButton, SignedOut, SignedIn, UserButton } from "@clerk/nextjs";
 import Link from "next/link";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { useEffect, useState } from "react";
+import { supabase } from "@/utils/supabaseClient";
 
 export default function HomePage() {
+  const [mounted, setMounted] = useState(false);
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    setMounted(true);
+
+    let alive = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!alive) return;
+      setUser(data.session?.user ?? null);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      alive = false;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 to-white dark:from-gray-900 dark:to-gray-800 text-gray-900 dark:text-white px-4 py-12 transition-colors">
-      
-      {/* Logo */}
-      <Image
-        src="/images/vetta-logo.png"
-        alt="Vetta AI Logo"
-        width={120}
-        height={120}
-        className="mb-6"
-        priority
-      />
+    <main className="min-h-screen flex flex-col items-center justify-center px-6 py-14 bg-neutral-950 text-neutral-100">
+      {/* No gray card container */}
+      <div className="flex flex-col items-center">
+        <h1 className="font-display text-6xl sm:text-7xl tracking-wide text-white">VETTA</h1>
+        <p className="mt-3 text-base sm:text-lg text-neutral-300 text-center">
+          AI-powered Assessment
+        </p>
 
-      {/* Title */}
-      <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-blue-800 dark:text-blue-300 mb-4 text-center">
-        Vetta AI
-      </h1>
+        <div className="mt-10 w-full max-w-md flex flex-col gap-3">
+          {!mounted ? (
+            <div className="h-12 rounded-xl bg-white/5 border border-white/10 animate-pulse" />
+          ) : !user ? (
+            <>
+              <Link href="/signin">
+                <button className="w-full h-12 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium">
+                  Dealer Sign In
+                </button>
+              </Link>
 
-      {/* Subtitle */}
-      <p className="text-lg sm:text-xl lg:text-2xl text-gray-700 dark:text-gray-300 mb-10 text-center max-w-2xl">
-        The AI-powered risk assessment system built for Buy Here Pay Here dealerships.
-      </p>
+              <Link href="/signup">
+                <button className="w-full h-12 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-100">
+                  Sign Up
+                </button>
+              </Link>
 
-      {/* Auth + Demo Buttons */}
-      <div className="w-full flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-        <SignedOut>
-          <SignInButton mode="modal">
-            <button className="w-full sm:w-auto bg-blue-700 text-white px-6 py-3 rounded-xl font-medium shadow hover:bg-blue-800 active:scale-95 transition">
-              Dealer Sign In
-            </button>
-          </SignInButton>
-          <Link href="/chatbot?dealer=demo" className="w-full sm:w-auto">
-            <button className="w-full sm:w-auto bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white px-6 py-3 rounded-xl font-medium shadow hover:bg-gray-200 dark:hover:bg-gray-600 active:scale-95 transition">
-              Try Demo
-            </button>
-          </Link>
-        </SignedOut>
-
-        <SignedIn>
-          <div className="flex flex-col sm:flex-row items-center gap-4">
-            <Link href="/dashboard" className="w-full sm:w-auto">
-              <button className="w-full sm:w-auto bg-blue-700 text-white px-6 py-3 rounded-xl font-medium shadow hover:bg-blue-800 active:scale-95 transition">
+              <Link href="/chatbot?dealer=demo">
+                <button className="w-full h-12 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-100">
+                  Try Demo
+                </button>
+              </Link>
+            </>
+          ) : (
+            <Link href="/dashboard">
+              <button className="w-full h-12 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium">
                 Go to Dashboard
               </button>
             </Link>
-            <UserButton afterSignOutUrl="/" />
-          </div>
-        </SignedIn>
-      </div>
-
-      {/* Theme Toggle */}
-      <div className="mt-12">
-        <ThemeToggle />
+          )}
+        </div>
       </div>
     </main>
   );

@@ -1,0 +1,23 @@
+// middleware.ts
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+
+// Lightweight protection for /api routes.
+// This does NOT replace the server-side limiter (keep that too).
+export function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  if (!pathname.startsWith("/api/")) return NextResponse.next();
+
+  // Basic bot noise reduction (optional)
+  const ua = req.headers.get("user-agent") || "";
+  if (!ua || ua.length < 8) {
+    return NextResponse.json({ error: "Bad request" }, { status: 400 });
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ["/api/:path*"],
+};
