@@ -1,16 +1,24 @@
+// app/api/start-assessment/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/utils/supabaseAdmin";
 
 /** Bearer token helper */
 function getBearerToken(req: Request) {
-  const h = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+  const h =
+    req.headers.get("authorization") ||
+    req.headers.get("Authorization") ||
+    "";
   const m = h.match(/^Bearer\s+(.+)$/i);
   return m ? m[1].trim() : "";
 }
 
 function isMissingColumn(err: any, columnName: string) {
   const msg = String(err?.message || "").toLowerCase();
-  return msg.includes("does not exist") && msg.includes("column") && msg.includes(columnName.toLowerCase());
+  return (
+    msg.includes("does not exist") &&
+    msg.includes("column") &&
+    msg.includes(columnName.toLowerCase())
+  );
 }
 
 /** Validate JWT -> user */
@@ -19,7 +27,9 @@ async function getAuthedUserId(req: Request) {
   if (!token) return { userId: null as string | null, error: "Missing auth token" };
 
   const { data, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !data?.user?.id) return { userId: null as string | null, error: "Not authenticated" };
+  if (error || !data?.user?.id) {
+    return { userId: null as string | null, error: "Not authenticated" };
+  }
 
   return { userId: data.user.id, error: null as string | null };
 }
@@ -32,21 +42,28 @@ async function getDealerIdForUser(userId: string) {
     .eq("id", userId)
     .maybeSingle();
 
-  if (profErr) return { dealerId: null as string | null, error: `profiles lookup failed: ${profErr.message}` };
+  if (profErr) {
+    return { dealerId: null as string | null, error: `profiles lookup failed: ${profErr.message}` };
+  }
 
   const dealerId = (prof as any)?.dealer_id ? String((prof as any).dealer_id) : null;
   if (dealerId) return { dealerId, error: null as string | null };
 
+  // fallback (legacy schema)
   const { data: dealer, error: dealerErr } = await supabaseAdmin
     .from("dealers")
     .select("id")
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (dealerErr) return { dealerId: null as string | null, error: `dealers lookup failed: ${dealerErr.message}` };
+  if (dealerErr) {
+    return { dealerId: null as string | null, error: `dealers lookup failed: ${dealerErr.message}` };
+  }
 
   const fallbackId = (dealer as any)?.id ? String((dealer as any).id) : null;
-  if (!fallbackId) return { dealerId: null as string | null, error: "Dealer not found for this user" };
+  if (!fallbackId) {
+    return { dealerId: null as string | null, error: "Dealer not found for this user" };
+  }
 
   return { dealerId: fallbackId, error: null as string | null };
 }
@@ -56,22 +73,32 @@ async function getDealerIdFromPublicKey(dealerKey: string) {
   const key = String(dealerKey || "").trim();
   if (!key) return { dealerId: null as string | null, error: "Missing dealer key" };
 
-  // IMPORTANT: cast query builder to any to avoid TS "excessively deep" on Vercel builds
-  const dealers = supabaseAdmin.from("dealers") as any;
+  // 1) name
+  let attempt = await supabaseAdmin
+    .from("dealers")
+    .select("id")
+    .eq("name", key)
+    .maybeSingle();
 
-  // name
-  let attempt = await dealers.select("id").eq("name", key).maybeSingle();
   if (!attempt.error && attempt.data?.id) {
-    return { dealerId: String(attempt.data.id), error: null as string | null };
+    return { dealerId: String((attempt.data as any).id), error: null as string | null };
   }
 
-  // slug (optional)
-  attempt = await dealers.select("id").eq("slug", key).maybeSingle();
-  if (attempt.error && isMissingColumn(attempt.error, "slug")) {
-    return { dealerId: null as string | null, error: "Dealer not found (slug missing + name mismatch)" };
+  // 2) slug (optional)
+  // IMPORTANT: this avoids the Vercel TS “type instantiation is excessively deep”
+  // by moving the `any` to the client instead of the column overload.
+  attempt = await (supabaseAdmin as any)
+    .from("dealers")
+    .select("id")
+    .eq("slug", key)
+    .maybeSingle();
+
+  if (attempt?.error && isMissingColumn(attempt.error, "slug")) {
+    return { dealerId: null as string | null, error: "Dealer not found (slug column missing + name mismatch)" };
   }
-  if (!attempt.error && attempt.data?.id) {
-    return { dealerId: String(attempt.data.id), error: null as string | null };
+
+  if (!attempt?.error && attempt?.data?.id) {
+    return { dealerId: String((attempt.data as any).id), error: null as string | null };
   }
 
   return { dealerId: null as string | null, error: "Dealer not found for this link" };
@@ -79,18 +106,22 @@ async function getDealerIdFromPublicKey(dealerKey: string) {
 
 /** dealerId -> preferred public key (dealers.name). If missing, return dealerId */
 async function getDealerKeyFromDealerId(dealerId: string) {
-  const { data, error } = await supabaseAdmin.from("dealers").select("name").eq("id", dealerId).maybeSingle();
+  const { data, error } = await supabaseAdmin
+    .from("dealers")
+    .select("name")
+    .eq("id", dealerId)
+    .maybeSingle();
+
   if (error) return dealerId;
+
   const key = String((data as any)?.name || "").trim();
   return key || dealerId;
 }
 
 /** Insert assessment with schema fallback dealer_id vs dealership_id (only if column truly missing) */
 async function insertAssessmentRow(payload: Record<string, any>) {
-  // cast to any to avoid deep TS inference in build
-  const assessments = supabaseAdmin.from("assessments") as any;
-
-  let ins = await assessments
+  let ins = await supabaseAdmin
+    .from("assessments")
     .insert(payload)
     .select("id, dealer_id, status, mode, flow, created_at, customer_name, customer_phone")
     .maybeSingle();
@@ -99,8 +130,9 @@ async function insertAssessmentRow(payload: Record<string, any>) {
     const fixed = { ...payload, dealership_id: payload.dealer_id };
     delete fixed.dealer_id;
 
-    ins = await assessments
-      .insert(fixed)
+    ins = await supabaseAdmin
+      .from("assessments")
+      .insert(fixed as any)
       .select("id, dealership_id, status, mode, flow, created_at, customer_name, customer_phone")
       .maybeSingle();
   }
@@ -123,11 +155,12 @@ export async function POST(req: Request) {
     const phone = String(body?.phone || "").trim();
 
     const customer_name =
-      (firstName || lastName ? `${firstName} ${lastName}`.trim() : "") ||
+      ((firstName || lastName) ? `${firstName} ${lastName}`.trim() : "") ||
       String(body?.customer_name || "").trim() ||
       null;
 
-    const customer_phone = phone || String(body?.customer_phone || "").trim() || null;
+    const customer_phone =
+      phone || String(body?.customer_phone || "").trim() || null;
 
     const token = getBearerToken(req);
 
@@ -137,20 +170,40 @@ export async function POST(req: Request) {
     if (token) {
       // Dealer-auth start
       const { userId, error: authErr } = await getAuthedUserId(req);
-      if (!userId) return NextResponse.json({ ok: false, error: authErr || "Not authenticated" }, { status: 401 });
+      if (!userId) {
+        return NextResponse.json(
+          { ok: false, error: authErr || "Not authenticated" },
+          { status: 401 }
+        );
+      }
 
       const { dealerId: did, error: dealerErr } = await getDealerIdForUser(userId);
-      if (!did) return NextResponse.json({ ok: false, error: dealerErr || "Dealer resolution failed" }, { status: 400 });
+      if (!did) {
+        return NextResponse.json(
+          { ok: false, error: dealerErr || "Dealer resolution failed" },
+          { status: 400 }
+        );
+      }
 
       dealerId = did;
       dealerKey = await getDealerKeyFromDealerId(dealerId);
     } else {
       // Public start (QR/link)
       const publicDealerKey = String(body?.dealer || "").trim();
-      if (!publicDealerKey) return NextResponse.json({ ok: false, error: "Missing dealer (public link)" }, { status: 400 });
+      if (!publicDealerKey) {
+        return NextResponse.json(
+          { ok: false, error: "Missing dealer (public link)" },
+          { status: 400 }
+        );
+      }
 
       const { dealerId: did, error: dealerErr } = await getDealerIdFromPublicKey(publicDealerKey);
-      if (!did) return NextResponse.json({ ok: false, error: dealerErr || "Dealer not found" }, { status: 404 });
+      if (!did) {
+        return NextResponse.json(
+          { ok: false, error: dealerErr || "Dealer not found" },
+          { status: 404 }
+        );
+      }
 
       dealerId = did;
       dealerKey = publicDealerKey;
@@ -165,14 +218,16 @@ export async function POST(req: Request) {
       created_at: new Date().toISOString(),
     };
 
-    // Save name/phone if provided
     if (customer_name) payload.customer_name = customer_name;
     if (customer_phone) payload.customer_phone = customer_phone;
 
     const { data: row, error: insErr } = await insertAssessmentRow(payload);
 
     if (insErr || !row?.id) {
-      return NextResponse.json({ ok: false, error: insErr?.message || "Insert failed" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: insErr?.message || "Insert failed" },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({
@@ -194,6 +249,9 @@ export async function POST(req: Request) {
     });
   } catch (e: any) {
     console.error("start-assessment error:", e);
-    return NextResponse.json({ ok: false, error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message || "Server error" },
+      { status: 500 }
+    );
   }
-}u
+}
