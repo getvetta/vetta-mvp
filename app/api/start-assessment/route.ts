@@ -1,4 +1,3 @@
-// app/api/start-assessment/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/utils/supabaseAdmin";
 
@@ -57,19 +56,22 @@ async function getDealerIdFromPublicKey(dealerKey: string) {
   const key = String(dealerKey || "").trim();
   if (!key) return { dealerId: null as string | null, error: "Missing dealer key" };
 
+  // IMPORTANT: cast query builder to any to avoid TS "excessively deep" on Vercel builds
+  const dealers = supabaseAdmin.from("dealers") as any;
+
   // name
-  let attempt = await supabaseAdmin.from("dealers").select("id").eq("name", key).maybeSingle();
+  let attempt = await dealers.select("id").eq("name", key).maybeSingle();
   if (!attempt.error && attempt.data?.id) {
-    return { dealerId: String((attempt.data as any).id), error: null as string | null };
+    return { dealerId: String(attempt.data.id), error: null as string | null };
   }
 
   // slug (optional)
-  attempt = await supabaseAdmin.from("dealers").select("id").eq("slug" as any, key).maybeSingle();
+  attempt = await dealers.select("id").eq("slug", key).maybeSingle();
   if (attempt.error && isMissingColumn(attempt.error, "slug")) {
     return { dealerId: null as string | null, error: "Dealer not found (slug missing + name mismatch)" };
   }
   if (!attempt.error && attempt.data?.id) {
-    return { dealerId: String((attempt.data as any).id), error: null as string | null };
+    return { dealerId: String(attempt.data.id), error: null as string | null };
   }
 
   return { dealerId: null as string | null, error: "Dealer not found for this link" };
@@ -85,8 +87,10 @@ async function getDealerKeyFromDealerId(dealerId: string) {
 
 /** Insert assessment with schema fallback dealer_id vs dealership_id (only if column truly missing) */
 async function insertAssessmentRow(payload: Record<string, any>) {
-  let ins = await supabaseAdmin
-    .from("assessments")
+  // cast to any to avoid deep TS inference in build
+  const assessments = supabaseAdmin.from("assessments") as any;
+
+  let ins = await assessments
     .insert(payload)
     .select("id, dealer_id, status, mode, flow, created_at, customer_name, customer_phone")
     .maybeSingle();
@@ -95,9 +99,8 @@ async function insertAssessmentRow(payload: Record<string, any>) {
     const fixed = { ...payload, dealership_id: payload.dealer_id };
     delete fixed.dealer_id;
 
-    ins = await supabaseAdmin
-      .from("assessments")
-      .insert(fixed as any)
+    ins = await assessments
+      .insert(fixed)
       .select("id, dealership_id, status, mode, flow, created_at, customer_name, customer_phone")
       .maybeSingle();
   }
@@ -193,4 +196,4 @@ export async function POST(req: Request) {
     console.error("start-assessment error:", e);
     return NextResponse.json({ ok: false, error: e?.message || "Server error" }, { status: 500 });
   }
-}
+}u
