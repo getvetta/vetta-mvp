@@ -31,6 +31,11 @@ type DealerPreferences = {
 const DEMO = "demo";
 const VEHICLE_TYPES = ["Sedan", "SUV", "Truck", "Van", "Coupe", "Hatchback", "Wagon", "Other"] as const;
 
+/** ✅ Helper to prevent TS from widening literals to `string` */
+function makeMsg(role: Role, content: string, kind?: MsgKind): Msg {
+  return kind ? { role, content, kind } : { role, content };
+}
+
 /** Similarity / Dedup */
 function normalize(s: string) {
   return (s || "")
@@ -67,56 +72,42 @@ function memKey(assessmentId: string | null, dealerKey: string) {
  * This Facts type MUST match /app/api/chat/turn/route.ts exactly
  */
 export type Facts = {
-  // Income
   pay_frequency?: "weekly" | "biweekly" | "monthly" | null;
   income_amount?: number | null;
 
-  // Bills
   rent_amount?: number | null;
   cell_phone_bill?: number | null;
   other_bills?: number | null;
 
-  // Employment
   job_title?: string | null;
   employer_name?: string | null;
   commute_minutes?: number | null;
   employment_months?: number | null;
 
-  // Residence
   residence_type?: "rent" | "own" | "family" | null;
   residence_months?: number | null;
 
-  // License
   has_driver_license?: boolean | null;
   license_state_match?: boolean | null;
 
-  // Vehicle (from intro UI)
   vehicle_type?: string | null;
   vehicle_specific?: string | null;
 
-  // Payments
   payment_frequency?: "weekly" | "biweekly" | "monthly" | null;
   down_payment?: number | null;
 
-  // Credit + context (high weight)
   credit_importance?: number | null;
   credit_below_reason?: string | null;
 
-  // Commitment & responsibility
   mechanical_failure_plan?: string | null;
   support_system?: boolean | null;
 
-  // Household
   spouse_cosigner?: boolean | null;
-
-  // Location tie-in
   born_in_state?: boolean | null;
 
-  // Reference contact
   reference_available?: boolean | null;
   reference_relation?: string | null;
 
-  // Flags
   warnings?: string[] | null;
   hard_stops?: string[] | null;
 };
@@ -137,15 +128,10 @@ function safeParseJSON<T>(s: string | null): T | null {
   }
 }
 
-/**
- * ✅ API ROUTES (STANDARDIZED)
- * You said your project is using plural: /api/assessments/...
- * So ALL assessment endpoints here are plural.
- */
+/** ✅ API ROUTES (plural) */
 const API = {
   intro: "/api/assessments/intro",
   progress: "/api/assessments/progress",
-  // NOTE: /api/assessments/[id] is used elsewhere (dashboard details)
 };
 
 export default function ChatbotPage() {
@@ -210,7 +196,7 @@ export default function ChatbotPage() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [vehicleMenuOpen]);
 
-  /** Memory Load/Save */
+  /** Memory Load */
   useEffect(() => {
     const key = memKey(assessmentId, dealerKey);
     const saved = safeParseJSON<SessionMemory>(typeof window !== "undefined" ? localStorage.getItem(key) : null);
@@ -226,6 +212,7 @@ export default function ChatbotPage() {
     }
   }, [assessmentId, dealerKey]);
 
+  /** Memory Save */
   useEffect(() => {
     const key = memKey(assessmentId, dealerKey);
     const payload: SessionMemory = {
@@ -253,7 +240,7 @@ export default function ChatbotPage() {
     }
   }, [stage, done]);
 
-  /** Load dealer custom questions + dealer settings */
+  /** Load dealer custom questions + settings */
   useEffect(() => {
     const load = async () => {
       setLoadingDealerData(true);
@@ -335,11 +322,7 @@ export default function ChatbotPage() {
     setStage("intro");
   };
 
-  /**
-   * ✅ PROGRESS SAVE (plural route)
-   * Before: /api/assessment/progress (404)
-   * Now:    /api/assessments/progress (should be 200)
-   */
+  /** Progress save */
   async function persistProgress(payload: { facts?: Facts; answers?: Msg[]; status?: string }) {
     if (!assessmentId) return;
     try {
@@ -355,7 +338,7 @@ export default function ChatbotPage() {
         }),
       });
     } catch {
-      // ignore (progress save should never block UX)
+      // ignore
     }
   }
 
@@ -372,8 +355,6 @@ export default function ChatbotPage() {
       return;
     }
 
-    // ✅ Save applicant info immediately so dashboard never shows "Customer"
-    // ✅ FIXED: plural route
     if (assessmentId) {
       try {
         const res = await fetch(API.intro, {
@@ -410,13 +391,7 @@ export default function ChatbotPage() {
     };
     setFacts(initialFacts);
 
-    const intro: Msg[] = [
-      {
-        role: "assistant",
-        kind: "sys",
-        content: `Hey ${firstName} — I’m Vetta. I’ll ask a few quick questions so ${biz} can understand your situation before you drive off today. Reply “ok” when you’re ready.`,
-      },
-    ];
+    const intro: Msg[] = [makeMsg("assistant", `Hey ${firstName} — I’m Vetta. I’ll ask a few quick questions so ${biz} can understand your situation before you drive off today. Reply “ok” when you’re ready.`, "sys")];
 
     setMessages(intro);
     setAwaitingFirstReply(true);
@@ -424,9 +399,7 @@ export default function ChatbotPage() {
     setRiskResult(null);
     setStage("chat");
 
-    // ✅ Save initial progress too (plural route)
     persistProgress({ facts: initialFacts, answers: intro, status: "started" });
-
     router.refresh();
   };
 
@@ -445,10 +418,7 @@ export default function ChatbotPage() {
         preferences: prefs,
         messages: args.chat,
         lastQuestionAsked: args.lastQuestionAsked,
-        memory: {
-          asked: args.askedSnapshot,
-          facts: args.factsSnapshot,
-        },
+        memory: { asked: args.askedSnapshot, facts: args.factsSnapshot },
       }),
     });
 
@@ -508,10 +478,9 @@ export default function ChatbotPage() {
     setBusy(true);
 
     try {
-      const chatAfterUser: Msg[] = [...messages, { role: "user", content: userText }];
+      const chatAfterUser: Msg[] = [...messages, makeMsg("user", userText)];
       setMessages(chatAfterUser);
 
-      // ✅ Save progress immediately after user message (plural route)
       persistProgress({ facts, answers: chatAfterUser, status: "in_progress" });
 
       const askedSnapshot = asked.slice();
@@ -527,35 +496,30 @@ export default function ChatbotPage() {
       if (server.serverFacts) setFacts(server.serverFacts);
       if (awaitingFirstReply) setAwaitingFirstReply(false);
 
+      // ✅ STOP PATH (this is where your TS error was happening)
       if (server.action === "stop") {
-        const updated = [...chatAfterUser, { role: "assistant", kind: "sys", content: server.nextQuestion || "Assessment ended." }];
+        const updated: Msg[] = [...chatAfterUser, makeMsg("assistant", server.nextQuestion || "Assessment ended.", "sys")];
         setMessages(updated);
         persistProgress({ facts: server.serverFacts ?? facts, answers: updated, status: "completed" });
-
         setDone(true);
         setStage("done");
         return;
       }
 
       if ((server.action === "clarify" || server.action === "warn" || server.action === "ask") && server.nextQuestion) {
-        setMessages((m) => {
-          const out = [...m];
-          if (server.action === "clarify" && server.explain) out.push({ role: "assistant", kind: "clarify", content: server.explain });
-          if (server.action !== "clarify" && server.ack && server.ack.length <= 40) out.push({ role: "assistant", kind: "ack", content: server.ack });
-          out.push({ role: "assistant", kind: "q", content: server.nextQuestion });
-          return out;
-        });
+        const assistantAdds: Msg[] = [];
+
+        if (server.action === "clarify" && server.explain) assistantAdds.push(makeMsg("assistant", server.explain, "clarify"));
+        if (server.action !== "clarify" && server.ack && server.ack.length <= 40) assistantAdds.push(makeMsg("assistant", server.ack, "ack"));
+        assistantAdds.push(makeMsg("assistant", server.nextQuestion, "q"));
+
+        const updated: Msg[] = [...chatAfterUser, ...assistantAdds];
+        setMessages(updated);
 
         setAsked((prev) => uniqPush(prev, server.nextQuestion));
         lastQuestionAskedRef.current = server.nextQuestion;
 
-        // ✅ Save progress after assistant question (plural route)
-        const preview = [...chatAfterUser];
-        if (server.action === "clarify" && server.explain) preview.push({ role: "assistant", kind: "clarify", content: server.explain });
-        if (server.action !== "clarify" && server.ack && server.ack.length <= 40) preview.push({ role: "assistant", kind: "ack", content: server.ack });
-        preview.push({ role: "assistant", kind: "q", content: server.nextQuestion });
-        persistProgress({ facts: server.serverFacts ?? facts, answers: preview, status: "in_progress" });
-
+        persistProgress({ facts: server.serverFacts ?? facts, answers: updated, status: "in_progress" });
         return;
       }
 
@@ -565,13 +529,6 @@ export default function ChatbotPage() {
     } finally {
       setBusy(false);
       if (!done) setTimeout(() => inputRef.current?.focus(), 60);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      if (!busy && !done && input.trim()) handleSend();
     }
   };
 
@@ -617,7 +574,7 @@ export default function ChatbotPage() {
   }, [facts]);
 
   // =========================
-  // INTRO (Applicant Info)
+  // INTRO
   // =========================
   if (stage === "intro") {
     return (
@@ -791,9 +748,7 @@ export default function ChatbotPage() {
               <div
                 className={
                   m.role === "assistant"
-                    ? `max-w-[85%] rounded-2xl rounded-bl-sm bg-white/5 px-3 py-2 text-sm border border-white/10 ${
-                        m.kind === "clarify" ? "text-neutral-200" : ""
-                      }`
+                    ? `max-w-[85%] rounded-2xl rounded-bl-sm bg-white/5 px-3 py-2 text-sm border border-white/10 ${m.kind === "clarify" ? "text-neutral-200" : ""}`
                     : "max-w-[85%] rounded-2xl rounded-br-sm bg-gradient-to-b from-brand-600 to-brand-700 text-white px-3 py-2 text-sm shadow-sm border border-white/10"
                 }
               >
