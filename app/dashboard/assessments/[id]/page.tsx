@@ -68,21 +68,26 @@ function safeArray<T>(v: any): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
 }
 
+/**
+ * ✅ FIXED:
+ * Force strict role typing so TS doesn't widen role to `string`.
+ */
 function getTranscript(a: Assessment): Msg[] {
   const arr = safeArray<any>(a.answers);
+
   return arr
-    .map((m) => ({
-      role: m.role === "user" ? "user" : "assistant",
-      content: String(m.content ?? m.text ?? "").trim(),
-      kind: m.kind ? String(m.kind) : undefined,
-    }))
+    .map((m): Msg => {
+      const role: Msg["role"] = m?.role === "user" ? "user" : "assistant";
+      return {
+        role,
+        content: String(m?.content ?? m?.text ?? "").trim(),
+        kind: m?.kind ? String(m.kind) : undefined,
+      };
+    })
     .filter((m) => (m.content || "").length > 0);
 }
 
 function parseMoneyFromReasoning(reasoning: string, label: string): number | null {
-  // Examples you have:
-  // "Income (estimated): ~ $5,846/mo"
-  // "Bills (rent + phone + other): ~ $1,130/mo"
   const r = reasoning || "";
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`${escaped}\\s*:\\s*[^$\\d]*\\$?([\\d,]+)`, "i");
@@ -163,7 +168,6 @@ export default function AssessmentDetailPage() {
       setDeleting(true);
       setError(null);
 
-      // Uses RLS — allowed if your delete policy exists and dealer matches
       const { error: delErr } = await supabase.from("assessments").delete().eq("id", id);
 
       if (delErr) {
@@ -197,8 +201,6 @@ export default function AssessmentDetailPage() {
     return type || vs;
   }, [row, facts]);
 
-  // --- Affordability fallback:
-  // If facts are missing, parse from reasoning so the left box doesn’t show blanks.
   const affordability = useMemo(() => {
     const reasoning = String(row?.reasoning || "");
 
@@ -210,7 +212,6 @@ export default function AssessmentDetailPage() {
         ? incomeFacts
         : parseMoneyFromReasoning(reasoning, "Income (estimated)");
 
-    // try multiple labels you’ve used in reasoning
     const billsParsed =
       parseMoneyFromReasoning(reasoning, "Bills (rent + phone + other)") ??
       parseMoneyFromReasoning(reasoning, "Bills (rent + phone + other):") ??
@@ -276,13 +277,9 @@ export default function AssessmentDetailPage() {
               </span>
             </p>
           </div>
-
-          {/* No ThemeToggle, no Refresh (per your request) */}
         </div>
 
-        {/* TOP SECTION: matches your screenshot style */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left: Applicant card */}
           <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur shadow-soft overflow-hidden">
             <div className="p-5 border-b border-white/10 flex items-start justify-between gap-3">
               <div>
@@ -319,15 +316,13 @@ export default function AssessmentDetailPage() {
                   <div>
                     Income (est):{" "}
                     <span className="text-neutral-100">
-                      {Number.isFinite(affordability.income as number) ? money(affordability.income) : "—"}
-                      {" / mo"}
+                      {Number.isFinite(affordability.income as number) ? money(affordability.income) : "—"}{" / mo"}
                     </span>
                   </div>
                   <div>
                     Bills (est):{" "}
                     <span className="text-neutral-100">
-                      {Number.isFinite(affordability.bills as number) ? money(affordability.bills) : "—"}
-                      {" / mo"}
+                      {Number.isFinite(affordability.bills as number) ? money(affordability.bills) : "—"}{" / mo"}
                     </span>
                   </div>
                   <div>
@@ -344,7 +339,6 @@ export default function AssessmentDetailPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {/* Open Chat REMOVED (per your request) */}
                 <button
                   onClick={downloadJSON}
                   className="h-11 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium"
@@ -363,14 +357,11 @@ export default function AssessmentDetailPage() {
             </div>
           </div>
 
-          {/* Right: Result summary */}
           <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur shadow-soft overflow-hidden">
             <div className="p-5 border-b border-white/10 font-semibold">Result Summary</div>
             <div className="p-5">
               {row.reasoning ? (
-                <pre className="text-sm text-neutral-200 whitespace-pre-wrap leading-6">
-                  {row.reasoning}
-                </pre>
+                <pre className="text-sm text-neutral-200 whitespace-pre-wrap leading-6">{row.reasoning}</pre>
               ) : (
                 <div className="text-sm text-neutral-300">
                   No reasoning saved yet. If the assessment is still in progress, this is normal.
@@ -380,7 +371,6 @@ export default function AssessmentDetailPage() {
           </div>
         </div>
 
-        {/* Chat replay (already below summary like you wanted) */}
         <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur shadow-soft overflow-hidden">
           <div className="p-5 border-b border-white/10 flex items-center justify-between">
             <div className="font-semibold">Chat Replay</div>

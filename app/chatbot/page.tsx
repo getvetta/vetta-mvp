@@ -1,4 +1,3 @@
-// app/chatbot/page.tsx
 "use client";
 
 import type React from "react";
@@ -31,10 +30,8 @@ type DealerPreferences = {
 const DEMO = "demo";
 const VEHICLE_TYPES = ["Sedan", "SUV", "Truck", "Van", "Coupe", "Hatchback", "Wagon", "Other"] as const;
 
-/** ✅ Helper to prevent TS from widening literals to `string` */
-function makeMsg(role: Role, content: string, kind?: MsgKind): Msg {
-  return kind ? { role, content, kind } : { role, content };
-}
+// ✅ Helper to prevent TS from widening literal types to string
+const msg = (m: Msg) => m;
 
 /** Similarity / Dedup */
 function normalize(s: string) {
@@ -72,42 +69,56 @@ function memKey(assessmentId: string | null, dealerKey: string) {
  * This Facts type MUST match /app/api/chat/turn/route.ts exactly
  */
 export type Facts = {
+  // Income
   pay_frequency?: "weekly" | "biweekly" | "monthly" | null;
   income_amount?: number | null;
 
+  // Bills
   rent_amount?: number | null;
   cell_phone_bill?: number | null;
   other_bills?: number | null;
 
+  // Employment
   job_title?: string | null;
   employer_name?: string | null;
   commute_minutes?: number | null;
   employment_months?: number | null;
 
+  // Residence
   residence_type?: "rent" | "own" | "family" | null;
   residence_months?: number | null;
 
+  // License
   has_driver_license?: boolean | null;
   license_state_match?: boolean | null;
 
+  // Vehicle (from intro UI)
   vehicle_type?: string | null;
   vehicle_specific?: string | null;
 
+  // Payments
   payment_frequency?: "weekly" | "biweekly" | "monthly" | null;
   down_payment?: number | null;
 
+  // Credit + context (high weight)
   credit_importance?: number | null;
   credit_below_reason?: string | null;
 
+  // Commitment & responsibility
   mechanical_failure_plan?: string | null;
   support_system?: boolean | null;
 
+  // Household
   spouse_cosigner?: boolean | null;
+
+  // Location tie-in
   born_in_state?: boolean | null;
 
+  // Reference contact
   reference_available?: boolean | null;
   reference_relation?: string | null;
 
+  // Flags
   warnings?: string[] | null;
   hard_stops?: string[] | null;
 };
@@ -128,7 +139,9 @@ function safeParseJSON<T>(s: string | null): T | null {
   }
 }
 
-/** ✅ API ROUTES (plural) */
+/**
+ * ✅ API ROUTES (STANDARDIZED)
+ */
 const API = {
   intro: "/api/assessments/intro",
   progress: "/api/assessments/progress",
@@ -196,7 +209,7 @@ export default function ChatbotPage() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [vehicleMenuOpen]);
 
-  /** Memory Load */
+  /** Memory Load/Save */
   useEffect(() => {
     const key = memKey(assessmentId, dealerKey);
     const saved = safeParseJSON<SessionMemory>(typeof window !== "undefined" ? localStorage.getItem(key) : null);
@@ -212,7 +225,6 @@ export default function ChatbotPage() {
     }
   }, [assessmentId, dealerKey]);
 
-  /** Memory Save */
   useEffect(() => {
     const key = memKey(assessmentId, dealerKey);
     const payload: SessionMemory = {
@@ -240,7 +252,7 @@ export default function ChatbotPage() {
     }
   }, [stage, done]);
 
-  /** Load dealer custom questions + settings */
+  /** Load dealer custom questions + dealer settings */
   useEffect(() => {
     const load = async () => {
       setLoadingDealerData(true);
@@ -322,7 +334,7 @@ export default function ChatbotPage() {
     setStage("intro");
   };
 
-  /** Progress save */
+  /** Save progress */
   async function persistProgress(payload: { facts?: Facts; answers?: Msg[]; status?: string }) {
     if (!assessmentId) return;
     try {
@@ -391,7 +403,13 @@ export default function ChatbotPage() {
     };
     setFacts(initialFacts);
 
-    const intro: Msg[] = [makeMsg("assistant", `Hey ${firstName} — I’m Vetta. I’ll ask a few quick questions so ${biz} can understand your situation before you drive off today. Reply “ok” when you’re ready.`, "sys")];
+    const intro: Msg[] = [
+      msg({
+        role: "assistant",
+        kind: "sys",
+        content: `Hey ${firstName} — I’m Vetta. I’ll ask a few quick questions so ${biz} can understand your situation before you drive off today. Reply “ok” when you’re ready.`,
+      }),
+    ];
 
     setMessages(intro);
     setAwaitingFirstReply(true);
@@ -400,6 +418,7 @@ export default function ChatbotPage() {
     setStage("chat");
 
     persistProgress({ facts: initialFacts, answers: intro, status: "started" });
+
     router.refresh();
   };
 
@@ -418,7 +437,10 @@ export default function ChatbotPage() {
         preferences: prefs,
         messages: args.chat,
         lastQuestionAsked: args.lastQuestionAsked,
-        memory: { asked: args.askedSnapshot, facts: args.factsSnapshot },
+        memory: {
+          asked: args.askedSnapshot,
+          facts: args.factsSnapshot,
+        },
       }),
     });
 
@@ -478,7 +500,7 @@ export default function ChatbotPage() {
     setBusy(true);
 
     try {
-      const chatAfterUser: Msg[] = [...messages, makeMsg("user", userText)];
+      const chatAfterUser: Msg[] = [...messages, msg({ role: "user", content: userText })];
       setMessages(chatAfterUser);
 
       persistProgress({ facts, answers: chatAfterUser, status: "in_progress" });
@@ -496,30 +518,50 @@ export default function ChatbotPage() {
       if (server.serverFacts) setFacts(server.serverFacts);
       if (awaitingFirstReply) setAwaitingFirstReply(false);
 
-      // ✅ STOP PATH (this is where your TS error was happening)
       if (server.action === "stop") {
-        const updated: Msg[] = [...chatAfterUser, makeMsg("assistant", server.nextQuestion || "Assessment ended.", "sys")];
+        const updated: Msg[] = [
+          ...chatAfterUser,
+          msg({ role: "assistant", kind: "sys", content: server.nextQuestion || "Assessment ended." }),
+        ];
         setMessages(updated);
         persistProgress({ facts: server.serverFacts ?? facts, answers: updated, status: "completed" });
+
         setDone(true);
         setStage("done");
         return;
       }
 
       if ((server.action === "clarify" || server.action === "warn" || server.action === "ask") && server.nextQuestion) {
-        const assistantAdds: Msg[] = [];
+        const preview: Msg[] = [...chatAfterUser];
 
-        if (server.action === "clarify" && server.explain) assistantAdds.push(makeMsg("assistant", server.explain, "clarify"));
-        if (server.action !== "clarify" && server.ack && server.ack.length <= 40) assistantAdds.push(makeMsg("assistant", server.ack, "ack"));
-        assistantAdds.push(makeMsg("assistant", server.nextQuestion, "q"));
+        setMessages((m) => {
+          const out: Msg[] = [...m];
 
-        const updated: Msg[] = [...chatAfterUser, ...assistantAdds];
-        setMessages(updated);
+          if (server.action === "clarify" && server.explain) {
+            const mm = msg({ role: "assistant", kind: "clarify", content: server.explain });
+            out.push(mm);
+          }
+
+          if (server.action !== "clarify" && server.ack && server.ack.length <= 40) {
+            const mm = msg({ role: "assistant", kind: "ack", content: server.ack });
+            out.push(mm);
+          }
+
+          const q = msg({ role: "assistant", kind: "q", content: server.nextQuestion });
+          out.push(q);
+
+          return out;
+        });
+
+        // build preview in the same typed way for persist
+        if (server.action === "clarify" && server.explain) preview.push(msg({ role: "assistant", kind: "clarify", content: server.explain }));
+        if (server.action !== "clarify" && server.ack && server.ack.length <= 40) preview.push(msg({ role: "assistant", kind: "ack", content: server.ack }));
+        preview.push(msg({ role: "assistant", kind: "q", content: server.nextQuestion }));
 
         setAsked((prev) => uniqPush(prev, server.nextQuestion));
         lastQuestionAskedRef.current = server.nextQuestion;
 
-        persistProgress({ facts: server.serverFacts ?? facts, answers: updated, status: "in_progress" });
+        persistProgress({ facts: server.serverFacts ?? facts, answers: preview, status: "in_progress" });
         return;
       }
 
@@ -788,7 +830,8 @@ export default function ChatbotPage() {
               disabled={busy || done}
             />
             <div className="mt-1 text-[11px] text-neutral-400">
-              Press <span className="font-semibold">Enter</span> to send • <span className="font-semibold">Shift+Enter</span> for new line
+              Press <span className="font-semibold">Enter</span> to send •{" "}
+              <span className="font-semibold">Shift+Enter</span> for new line
             </div>
           </div>
 
