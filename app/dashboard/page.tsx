@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/utils/supabaseClient";
-import QRCode from "qrcode";
+import { QRCodeCanvas } from "qrcode.react";
 
 type Assessment = {
   id: string;
@@ -114,19 +114,18 @@ export default function DashboardPage() {
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // create/start buttons
   const [creating, setCreating] = useState(false);
-
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // QR modal
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [qrUrl, setQrUrl] = useState<string>("");
-  const [qrDataUrl, setQrDataUrl] = useState<string>("");
   const [qrAssessmentId, setQrAssessmentId] = useState<string>("");
+  const [qrPngDataUrl, setQrPngDataUrl] = useState<string>("");
 
   const printRef = useRef<HTMLDivElement | null>(null);
+  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   async function fetchDealerIdForUser(userId: string) {
     setDealerLoading(true);
@@ -176,7 +175,6 @@ export default function DashboardPage() {
     }
   }
 
-  // Prefer slug if it exists, else name, else id
   async function getPublicDealerKey(dId: string) {
     try {
       const { data, error } = await supabase.from("dealers").select("slug, name").eq("id", dId).maybeSingle();
@@ -300,28 +298,14 @@ export default function DashboardPage() {
   }, [dealerId]);
 
   function buildChatbotUrl(dealerKeyForUrl: string, assessmentId: string) {
-    return `${window.location.origin}/chatbot?dealer=${encodeURIComponent(dealerKeyForUrl)}&assessmentId=${encodeURIComponent(
-      assessmentId
-    )}`;
+    return `${window.location.origin}/chatbot?dealer=${encodeURIComponent(dealerKeyForUrl)}&assessmentId=${encodeURIComponent(assessmentId)}`;
   }
 
-  // ✅ QR should go straight to chatbot (no assessmentId).
-  // Chatbot will create the assessment after applicant enters their info.
   function buildPublicChatbotUrl(dealerKeyForUrl: string) {
     return `${window.location.origin}/chatbot?dealer=${encodeURIComponent(dealerKeyForUrl)}`;
   }
 
-  async function makeQrFromUrl(url: string) {
-    return QRCode.toDataURL(url, {
-      errorCorrectionLevel: "M",
-      margin: 2,
-      scale: 7,
-      color: { dark: "#0B1220", light: "#FFFFFF" },
-    });
-  }
-
   // ✅ Start on dealer device: create assessment ONLY, then redirect.
-  // Applicant info is collected + saved inside /chatbot (intro screen).
   async function startOnDealerDevice() {
     if (!dealerId) return;
 
@@ -337,16 +321,12 @@ export default function DashboardPage() {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         cache: "no-store",
-        body: JSON.stringify({
-          kind: "device",
-          // ✅ no applicant info here anymore
-        }),
+        body: JSON.stringify({ kind: "device" }),
       });
 
       const json = await res.json().catch(() => null);
       if (!res.ok) throw new Error(json?.error || "Could not create assessment");
 
-      // refresh list
       loadAssessments(dealerId);
 
       const dealerKeyForUrl =
@@ -364,7 +344,7 @@ export default function DashboardPage() {
     }
   }
 
-  // QR Code: generate a URL to /chatbot?dealer=...
+  // ✅ QR Code: /chatbot?dealer=...
   async function openQr() {
     if (!dealerId) return;
     setCreating(true);
@@ -374,12 +354,9 @@ export default function DashboardPage() {
       const dealerKeyForUrl = await getPublicDealerKey(dealerId);
       const url = buildPublicChatbotUrl(dealerKeyForUrl);
 
-      const qr = await makeQrFromUrl(url);
       setQrUrl(url);
-      setQrDataUrl(qr);
-
-      // QR path creates assessment AFTER applicant submits their info
       setQrAssessmentId("Created after customer submits info");
+      setQrPngDataUrl(""); // will be populated after canvas renders
       setQrModalOpen(true);
     } catch (e: any) {
       setErrorMsg(e?.message || "Could not generate QR");
@@ -387,6 +364,25 @@ export default function DashboardPage() {
       setCreating(false);
     }
   }
+
+  // When modal opens and QR renders, grab PNG for printing
+  useEffect(() => {
+    if (!qrModalOpen) return;
+
+    const t = setTimeout(() => {
+      try {
+        const canvas = qrCanvasRef.current;
+        if (canvas) {
+          const dataUrl = canvas.toDataURL("image/png");
+          setQrPngDataUrl(dataUrl);
+        }
+      } catch {
+        // ignore
+      }
+    }, 50);
+
+    return () => clearTimeout(t);
+  }, [qrModalOpen, qrUrl]);
 
   const copyQrLink = async () => {
     if (!qrUrl) return;
@@ -502,9 +498,7 @@ export default function DashboardPage() {
           <h1 className="text-xl font-semibold">Dealer Dashboard</h1>
           <p className="mt-2 text-sm text-neutral-300">You must be signed in to view the dashboard.</p>
           <Link href="/signin">
-            <button className="mt-5 h-11 px-6 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium">
-              Go to Sign In
-            </button>
+            <button className="mt-5 h-11 px-6 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium">Go to Sign In</button>
           </Link>
         </div>
       </main>
@@ -555,8 +549,7 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-3xl font-extrabold tracking-tight">Assessments</h1>
             <p className="mt-1 text-sm text-neutral-300">
-              Start in-store on your device, or use <span className="text-neutral-100 font-semibold">QR Code</span> so the customer can use their
-              phone.
+              Start in-store on your device, or use <span className="text-neutral-100 font-semibold">QR Code</span> so the customer can use their phone.
             </p>
 
             <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -705,10 +698,16 @@ export default function DashboardPage() {
 
                 <div className="qrWrap">
                   <div className="qrBox">
-                    {qrDataUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={qrDataUrl} alt="QR Code" style={{ width: 280, height: 280, objectFit: "contain", display: "block" }} />
-                    ) : null}
+                    <QRCodeCanvas
+                      value={qrUrl || "https://getvetta.app"}
+                      size={280}
+                      includeMargin
+                      level="M"
+                      ref={(node) => {
+                        // qrcode.react ref gives canvas element
+                        qrCanvasRef.current = node as unknown as HTMLCanvasElement | null;
+                      }}
+                    />
                   </div>
                 </div>
 
@@ -749,10 +748,33 @@ export default function DashboardPage() {
                 Open URL
               </button>
 
-              <button onClick={printQr} className="h-11 px-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-100">
+              <button
+                onClick={() => {
+                  // Ensure print has an <img> if you want it (optional)
+                  // Currently print uses the HTML inside printRef (canvas prints fine in most browsers)
+                  printQr();
+                }}
+                className="h-11 px-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-100"
+              >
                 Print QR
               </button>
             </div>
+
+            {/* Optional: if you want a PNG preview/backup */}
+            {qrPngDataUrl ? (
+              <div className="mt-3 text-xs text-neutral-500">
+                QR PNG ready (for printing reliability).{" "}
+                <button
+                  className="underline text-neutral-300"
+                  onClick={() => {
+                    const w = window.open("", "_blank");
+                    if (w) w.document.write(`<img src="${qrPngDataUrl}" style="max-width:100%;height:auto;" />`);
+                  }}
+                >
+                  Open PNG
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       )}

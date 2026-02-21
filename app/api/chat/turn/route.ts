@@ -19,15 +19,14 @@ type DealerPreferences = {
   notes?: string | null;
 };
 
-/**
- * ✅ MUST match:
- * - app/chatbot/page.tsx Facts
- * - app/api/analyze-risk/route.ts Facts
- */
 type Facts = {
   // Income
   pay_frequency?: "weekly" | "biweekly" | "monthly" | null;
   income_amount?: number | null;
+
+  // ✅ Derived for dashboard/detail pages
+  income_monthly?: number | null;
+  bills_monthly?: number | null;
 
   // Residence
   residence_type?: "rent" | "own" | "family" | null;
@@ -41,23 +40,22 @@ type Facts = {
 
   // License
   has_driver_license?: boolean | null;
-  license_state_match?: boolean | null; // in-state true, out-of-state false
+  license_state_match?: boolean | null;
 
   // Vehicle (from intro UI)
   vehicle_type?: string | null;
   vehicle_specific?: string | null;
 
   // Bills (monthly)
-  rent_amount?: number | null; // rent/mortgage OR family contribution
+  rent_amount?: number | null;
   cell_phone_bill?: number | null;
   subscriptions_bill?: number | null;
 
-  // If rent/own (ask these)
   water_bill?: number | null;
   electric_bill?: number | null;
   wifi_bill?: number | null;
 
-  // Food behavior (weekly)
+  // Food (weekly)
   eat_out_frequency?: "never" | "1-2" | "3-5" | "6+" | null;
   eat_out_spend_weekly?: number | null;
   groceries_spend_weekly?: number | null;
@@ -65,29 +63,26 @@ type Facts = {
   // Down payment
   down_payment?: number | null;
 
-  // Credit + context (high weight)
-  credit_importance?: number | null; // 1-10
+  // Credit + context
+  credit_importance?: number | null;
   credit_below_reason?: string | null;
 
-  // ✅ NEW: Deal / intention questions (multiple choice)
-  prior_auto_financing?: string | null; // e.g. "A - ..."
-  vehicle_priority?: string | null; // e.g. "B - ..."
-  bad_deal_definition?: string | null; // e.g. "C - ..."
-  vehicle_benefit?: string | null; // e.g. "D - ..."
+  // Intent / deal alignment
+  prior_auto_financing?: string | null;
+  vehicle_priority?: string | null;
+  bad_deal_definition?: string | null;
+  vehicle_benefit?: string | null;
 
   // Commitment & responsibility
-  mechanical_failure_plan?: string | null; // normalized: "A - ..."
-
+  mechanical_failure_plan?: string | null;
   support_system?: boolean | null;
 
-  // Reference question (no contact info collected now)
+  // Reference
   vehicle_reference_available?: boolean | null;
   vehicle_reference_relation?: string | null;
 
-  // Household
+  // Household / tie-in
   spouse_cosigner?: boolean | null;
-
-  // Location tie-in
   born_in_state?: boolean | null;
 
   // Flags
@@ -114,41 +109,24 @@ type TurnRequest = {
 
 type Action = "ask" | "warn" | "clarify" | "stop";
 
-/**
- * ✅ Flow 1 (Stability-First) locked baseline — with your modification:
- * payment preference comes before payment comfort
- *
- * ✅ Updates in this file:
- * - Added 4 new multiple-choice questions (A/B/C/D/E)
- * - Kept scenario split into 2 messages (ack + nextQuestion)
- * - Kept food logic + conditional utilities
- */
 const FLOW = [
-  // Employment deep
   "job_title",
   "employer_name",
   "commute_minutes",
   "employment_months",
 
-  // Residence
   "residence_type",
   "residence_months",
 
-  // License
   "has_driver_license",
   "license_state_match",
 
-  // Born in state
   "born_in_state",
-
-  // Spouse / co-signer
   "spouse_cosigner",
 
-  // Pay frequency then amount
   "pay_frequency",
   "income_amount",
 
-  // Bills (conditional sequence handled by nextMissingTopic)
   "rent_amount",
   "cell_phone_bill",
   "subscriptions_bill",
@@ -156,29 +134,23 @@ const FLOW = [
   "electric_bill",
   "wifi_bill",
 
-  // Food behavior
   "eat_out_frequency",
   "eat_out_spend_weekly",
   "groceries_spend_weekly",
 
-  // Down payment
   "down_payment",
 
-  // Credit & context
   "credit_importance",
   "credit_below_reason",
 
-  // ✅ NEW: Intent / deal alignment
   "prior_auto_financing",
   "vehicle_priority",
   "bad_deal_definition",
   "vehicle_benefit",
 
-  // Scenario + support
   "mechanical_failure_plan",
   "support_system",
 
-  // Reference
   "vehicle_reference_available",
   "vehicle_reference_relation",
 ] as const;
@@ -201,17 +173,12 @@ function normalize(s: string) {
     .trim();
 }
 
-/**
- * Only treat as confused if truly confusion / refusal / empty.
- * ✅ allow single-letter answers like A/B/C/D/E or Y/N, and digits 1-9/10.
- */
 function looksConfused(textRaw: string) {
   const raw = String(textRaw || "").trim();
   const t = normalize(textRaw);
 
   if (!t) return true;
 
-  // allow single letter / digit replies
   if (raw.length === 1) {
     const c = raw.toLowerCase();
     if (["a", "b", "c", "d", "e", "y", "n"].includes(c)) return false;
@@ -307,49 +274,29 @@ function parseYesNo(textRaw: string): boolean | null {
 function parsePayFrequency(textRaw: string): Facts["pay_frequency"] | null {
   const t = normalize(textRaw);
   if (t.includes("weekly") || /\bweek\b/.test(t)) return "weekly";
-  if (t.includes("biweekly") || t.includes("bi weekly") || t.includes("every two weeks") || t.includes("2 weeks"))
-    return "biweekly";
+  if (t.includes("biweekly") || t.includes("bi weekly") || t.includes("every two weeks") || t.includes("2 weeks")) return "biweekly";
   if (t.includes("monthly") || /\bmonth\b/.test(t)) return "monthly";
   return null;
 }
 
-/**
- * Scenario parser:
- * Accepts A/B/C/D or phrases.
- */
 function parseScenarioChoice(textRaw: string): "A" | "B" | "C" | "D" | null {
   const raw = String(textRaw || "").trim();
   if (!raw) return null;
 
   const upper = raw.toUpperCase().trim();
-
   const m = upper.match(/^\s*([ABCD])\b/);
   if (m) return m[1] as any;
 
   const t = normalize(textRaw);
-
-  if (t.includes("take responsibility") || t.includes("get it fixed") || t.includes("fix it") || t.includes("repair it"))
-    return "A";
-  if (
-    t.includes("call") &&
-    (t.includes("dealership") || t.includes("you") || t.includes("us") || t.includes("shop") || t.includes("see if"))
-  )
+  if (t.includes("take responsibility") || t.includes("get it fixed") || t.includes("fix it") || t.includes("repair it")) return "A";
+  if (t.includes("call") && (t.includes("dealership") || t.includes("you") || t.includes("us") || t.includes("shop") || t.includes("see if")))
     return "B";
-  if (t.includes("drive until") || t.includes("tow") || t.includes("keep driving") || t.includes("until it dies"))
-    return "C";
-  if (t.includes("give the car back") || t.includes("return it") || t.includes("bring it back") || t.includes("give it back"))
-    return "D";
-
+  if (t.includes("drive until") || t.includes("tow") || t.includes("keep driving") || t.includes("until it dies")) return "C";
+  if (t.includes("give the car back") || t.includes("return it") || t.includes("bring it back") || t.includes("give it back")) return "D";
   return null;
 }
 
-/**
- * Generic multiple-choice parser for A/B/C/D/E (also accepts 1-5).
- */
-function parseChoiceLetter(
-  textRaw: string,
-  allowed: Array<"A" | "B" | "C" | "D" | "E">
-): ("A" | "B" | "C" | "D" | "E") | null {
+function parseChoiceLetter(textRaw: string, allowed: Array<"A" | "B" | "C" | "D" | "E">) {
   const raw = String(textRaw || "").trim();
   if (!raw) return null;
 
@@ -358,10 +305,9 @@ function parseChoiceLetter(
   const m = upper.match(/^\s*([ABCDE])\b/);
   if (m) {
     const c = m[1] as any;
-    return allowed.includes(c) ? c : null;
+    return allowed.includes(c) ? (c as any) : null;
   }
 
-  // allow 1-5 mapping
   const d = upper.match(/^\s*([1-5])\b/);
   if (d) {
     const map: Record<string, "A" | "B" | "C" | "D" | "E"> = { "1": "A", "2": "B", "3": "C", "4": "D", "5": "E" };
@@ -378,20 +324,7 @@ function addJobSignalsToWarnings(facts: Facts) {
   const warnings = new Set<string>(Array.isArray(facts.warnings) ? facts.warnings : []);
 
   const managementWords = ["manager", "supervisor", "lead", "foreman", "director", "owner", "gm", "general manager"];
-  const skilledWords = [
-    "nurse",
-    "rn",
-    "lpn",
-    "engineer",
-    "technician",
-    "mechanic",
-    "electrician",
-    "plumber",
-    "hvac",
-    "welder",
-    "driver",
-    "cdl",
-  ];
+  const skilledWords = ["nurse", "rn", "lpn", "engineer", "technician", "mechanic", "electrician", "plumber", "hvac", "welder", "driver", "cdl"];
   const gigWords = ["uber", "lyft", "doordash", "instacart", "gig", "freelance", "self employed", "self-employed", "contractor"];
   const tempWords = ["temp", "seasonal", "season", "part time", "part-time", "agency"];
   const lowWageEmployers = ["chipotle", "mcdonald", "walmart", "dollar tree", "dollar general", "burger king", "taco bell", "wendy", "subway"];
@@ -432,7 +365,6 @@ function questionFor(topic: Topic, facts: Facts) {
 
     case "born_in_state":
       return "Were you born in the same state as this dealership is located?";
-
     case "spouse_cosigner":
       return "If needed, do you have a spouse that can go on the loan with you?";
 
@@ -441,7 +373,6 @@ function questionFor(topic: Topic, facts: Facts) {
     case "income_amount":
       return "About how much do you bring home each paycheck after taxes?";
 
-    // Bills (no tips in parentheses)
     case "rent_amount":
       return "How much is your rent or mortgage each month?";
     case "cell_phone_bill":
@@ -449,7 +380,6 @@ function questionFor(topic: Topic, facts: Facts) {
     case "subscriptions_bill":
       return "About how much do you spend on subscriptions each month?";
 
-    // Rent/Own utilities
     case "water_bill":
       return "About how much is your water bill each month?";
     case "electric_bill":
@@ -457,7 +387,6 @@ function questionFor(topic: Topic, facts: Facts) {
     case "wifi_bill":
       return "About how much is your Wi-Fi bill each month?";
 
-    // Food behavior
     case "eat_out_frequency":
       return "How often do you eat out each week?";
     case "eat_out_spend_weekly":
@@ -473,7 +402,6 @@ function questionFor(topic: Topic, facts: Facts) {
     case "credit_below_reason":
       return "What would you say is the main reason your credit is below standard?";
 
-    // ✅ NEW: Multiple choice blocks (A/B/C/D/E)
     case "prior_auto_financing":
       return [
         "Have you ever financed a vehicle through a dealership or auto loan before?",
@@ -524,7 +452,6 @@ function questionFor(topic: Topic, facts: Facts) {
       ].join("\n");
 
     case "mechanical_failure_plan":
-      // second message only (first message is handled via ack)
       return [
         "Let’s say your car needs a repair and your payment is due next week. What would you do?",
         "",
@@ -552,19 +479,14 @@ function questionFor(topic: Topic, facts: Facts) {
 function isFactFilled(topic: Topic, facts: Facts) {
   const f: any = facts;
 
-  // Conditional skip rules:
-  // - If residence is FAMILY, skip utilities (water/electric/wifi)
   if (facts.residence_type === "family") {
     if (topic === "water_bill" || topic === "electric_bill" || topic === "wifi_bill") return true;
   }
 
-  // Eat out logic:
-  // If they say never, skip eat_out_spend_weekly and ask groceries instead.
   if (topic === "eat_out_spend_weekly") {
     if (facts.eat_out_frequency === "never") return true;
   }
   if (topic === "groceries_spend_weekly") {
-    // Only required if they don't eat out
     if (facts.eat_out_frequency && facts.eat_out_frequency !== "never") return true;
   }
 
@@ -637,28 +559,24 @@ function applyParse(topic: Topic, userText: string, facts: Facts): { nextFacts: 
       next.job_title = v;
       return { nextFacts: next, ok: true };
     }
-
     case "employer_name": {
       const v = userText.trim();
       if (v.length < 2) return { nextFacts: next, ok: false };
       next.employer_name = v;
       return { nextFacts: next, ok: true };
     }
-
     case "commute_minutes": {
       const m = parseMinutes(userText);
       if (m == null || m < 0) return { nextFacts: next, ok: false };
       next.commute_minutes = m;
       return { nextFacts: next, ok: true };
     }
-
     case "employment_months": {
       const m = parseMonths(userText);
       if (m == null || m < 0) return { nextFacts: next, ok: false };
       next.employment_months = m;
       return { nextFacts: next, ok: true };
     }
-
     case "residence_type": {
       const t = normalize(userText);
       if (t.includes("rent")) next.residence_type = "rent";
@@ -667,21 +585,18 @@ function applyParse(topic: Topic, userText: string, facts: Facts): { nextFacts: 
       else return { nextFacts: next, ok: false };
       return { nextFacts: next, ok: true };
     }
-
     case "residence_months": {
       const m = parseMonths(userText);
       if (m == null || m < 0) return { nextFacts: next, ok: false };
       next.residence_months = m;
       return { nextFacts: next, ok: true };
     }
-
     case "has_driver_license": {
       const yn = parseYesNo(userText);
       if (yn == null) return { nextFacts: next, ok: false };
       next.has_driver_license = yn;
       return { nextFacts: next, ok: true };
     }
-
     case "license_state_match": {
       const t = normalize(userText);
       if (t.includes("in state") || t.includes("in-state") || t.includes("same state")) {
@@ -699,28 +614,24 @@ function applyParse(topic: Topic, userText: string, facts: Facts): { nextFacts: 
       }
       return { nextFacts: next, ok: false };
     }
-
     case "born_in_state": {
       const yn = parseYesNo(userText);
       if (yn == null) return { nextFacts: next, ok: false };
       next.born_in_state = yn;
       return { nextFacts: next, ok: true };
     }
-
     case "spouse_cosigner": {
       const yn = parseYesNo(userText);
       if (yn == null) return { nextFacts: next, ok: false };
       next.spouse_cosigner = yn;
       return { nextFacts: next, ok: true };
     }
-
     case "pay_frequency": {
       const f = parsePayFrequency(userText);
       if (!f) return { nextFacts: next, ok: false };
       next.pay_frequency = f;
       return { nextFacts: next, ok: true };
     }
-
     case "income_amount": {
       const n = parseMoney(userText);
       if (n == null || n <= 0) return { nextFacts: next, ok: false };
@@ -728,7 +639,6 @@ function applyParse(topic: Topic, userText: string, facts: Facts): { nextFacts: 
       return { nextFacts: next, ok: true };
     }
 
-    // ✅ Bills: allow all answer types (store 0 + warning if non-numeric)
     case "rent_amount":
     case "cell_phone_bill":
     case "subscriptions_bill":
@@ -743,14 +653,7 @@ function applyParse(topic: Topic, userText: string, facts: Facts): { nextFacts: 
         (next as any)[topic] = 0;
         return { nextFacts: next, ok: true };
       }
-      if (n < 0) {
-        const w = new Set<string>(Array.isArray(next.warnings) ? next.warnings : []);
-        w.add(`bill_negative_${topic}`);
-        next.warnings = Array.from(w);
-        (next as any)[topic] = 0;
-        return { nextFacts: next, ok: true };
-      }
-      (next as any)[topic] = n;
+      (next as any)[topic] = Math.max(0, n);
       return { nextFacts: next, ok: true };
     }
 
@@ -774,11 +677,7 @@ function applyParse(topic: Topic, userText: string, facts: Facts): { nextFacts: 
         }
       }
 
-      if (t.includes("once") || t.includes("twice")) {
-        next.eat_out_frequency = "1-2";
-        return { nextFacts: next, ok: true };
-      }
-      if (t.includes("few") || t.includes("some") || t.includes("couple")) {
+      if (t.includes("once") || t.includes("twice") || t.includes("couple") || t.includes("few")) {
         next.eat_out_frequency = "1-2";
         return { nextFacts: next, ok: true };
       }
@@ -797,27 +696,23 @@ function applyParse(topic: Topic, userText: string, facts: Facts): { nextFacts: 
 
     case "eat_out_spend_weekly": {
       const n = parseMoney(userText);
+      next.eat_out_spend_weekly = Math.max(0, n ?? 0);
       if (n == null) {
         const w = new Set<string>(Array.isArray(next.warnings) ? next.warnings : []);
         w.add("eat_out_non_numeric");
         next.warnings = Array.from(w);
-        next.eat_out_spend_weekly = 0;
-        return { nextFacts: next, ok: true };
       }
-      next.eat_out_spend_weekly = Math.max(0, n);
       return { nextFacts: next, ok: true };
     }
 
     case "groceries_spend_weekly": {
       const n = parseMoney(userText);
+      next.groceries_spend_weekly = Math.max(0, n ?? 0);
       if (n == null) {
         const w = new Set<string>(Array.isArray(next.warnings) ? next.warnings : []);
         w.add("groceries_non_numeric");
         next.warnings = Array.from(w);
-        next.groceries_spend_weekly = 0;
-        return { nextFacts: next, ok: true };
       }
-      next.groceries_spend_weekly = Math.max(0, n);
       return { nextFacts: next, ok: true };
     }
 
@@ -844,7 +739,6 @@ function applyParse(topic: Topic, userText: string, facts: Facts): { nextFacts: 
       return { nextFacts: next, ok: true };
     }
 
-    // ✅ NEW multiple-choice parses
     case "prior_auto_financing": {
       const c = parseChoiceLetter(userText, ["A", "B", "C", "D"]);
       if (!c) return { nextFacts: next, ok: false };
@@ -1012,6 +906,41 @@ function clarifyExplain(topic: Topic) {
   }
 }
 
+// ✅ Derived affordability
+function deriveAffordability(facts: Facts) {
+  const pay = facts.pay_frequency;
+  const perPay = Number(facts.income_amount ?? NaN);
+  let incomeMonthly: number | null = null;
+
+  if (Number.isFinite(perPay) && perPay > 0) {
+    if (pay === "weekly") incomeMonthly = (perPay * 52) / 12;
+    else if (pay === "biweekly") incomeMonthly = (perPay * 26) / 12;
+    else if (pay === "monthly") incomeMonthly = perPay;
+  }
+
+  const billsMonthlyParts = [
+    facts.rent_amount,
+    facts.cell_phone_bill,
+    facts.subscriptions_bill,
+    facts.water_bill,
+    facts.electric_bill,
+    facts.wifi_bill,
+  ].map((v) => (Number.isFinite(Number(v)) ? Number(v) : 0));
+
+  const baseBills = billsMonthlyParts.reduce((a, b) => a + b, 0);
+
+  const eatOutWeekly = Number.isFinite(Number(facts.eat_out_spend_weekly)) ? Number(facts.eat_out_spend_weekly) : 0;
+  const groceriesWeekly = Number.isFinite(Number(facts.groceries_spend_weekly)) ? Number(facts.groceries_spend_weekly) : 0;
+  const foodMonthly = (eatOutWeekly + groceriesWeekly) * 4.33; // avg weeks per month
+
+  const billsMonthly = baseBills + foodMonthly;
+
+  return {
+    income_monthly: incomeMonthly,
+    bills_monthly: Number.isFinite(billsMonthly) ? billsMonthly : null,
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => ({}))) as TurnRequest;
@@ -1022,8 +951,18 @@ export async function POST(req: Request) {
 
     const userText = lastUserMessage(messages);
 
+    // First call / empty messages: return an "ask" shell
     if (!messages.length) {
-      return NextResponse.json({ action: "ask" satisfies Action, ack: "", explain: "", nextQuestion: "", facts });
+      const derived0 = deriveAffordability(facts);
+      const serverFacts0: Facts = { ...facts, ...derived0 };
+      return NextResponse.json({
+        action: "ask" as Action,
+        ack: "",
+        explain: "",
+        nextQuestion: "",
+        facts: serverFacts0,
+        serverFacts: serverFacts0,
+      });
     }
 
     const lastQ = String(body.lastQuestionAsked || "").trim();
@@ -1039,24 +978,30 @@ export async function POST(req: Request) {
     }
 
     if (lastTopic && looksConfused(userText)) {
+      const derived = deriveAffordability(facts);
+      const serverFacts: Facts = { ...facts, ...derived };
       return NextResponse.json({
-        action: "clarify" satisfies Action,
+        action: "clarify" as Action,
         ack: "",
         explain: clarifyExplain(lastTopic),
         nextQuestion: questionFor(lastTopic, facts),
-        facts,
+        facts: serverFacts,
+        serverFacts,
       });
     }
 
     if (lastTopic) {
       const parsed = applyParse(lastTopic, userText, facts);
       if (!parsed.ok) {
+        const derived = deriveAffordability(facts);
+        const serverFacts: Facts = { ...facts, ...derived };
         return NextResponse.json({
-          action: "clarify" satisfies Action,
+          action: "clarify" as Action,
           ack: "",
           explain: clarifyExplain(lastTopic),
           nextQuestion: questionFor(lastTopic, facts),
-          facts,
+          facts: serverFacts,
+          serverFacts,
         });
       }
       Object.assign(facts, parsed.nextFacts);
@@ -1066,19 +1011,25 @@ export async function POST(req: Request) {
       }
     }
 
+    // Update derived affordability after parsing
+    const derivedNow = deriveAffordability(facts);
+    facts.income_monthly = derivedNow.income_monthly;
+    facts.bills_monthly = derivedNow.bills_monthly;
+
     const nextTopic = nextMissingTopic(facts);
 
     if (!nextTopic) {
+      const serverFacts: Facts = { ...facts };
       return NextResponse.json({
-        action: "stop" satisfies Action,
+        action: "stop" as Action,
         ack: "Got it.",
         explain: "",
         nextQuestion: "Thanks — that’s everything I needed.",
-        facts,
+        facts: serverFacts,
+        serverFacts,
       });
     }
 
-    // Soft warnings used later
     const warnings: string[] = Array.isArray(facts.warnings) ? [...facts.warnings] : [];
     if (facts.license_state_match === false && !warnings.includes("license_out_of_state")) warnings.push("license_out_of_state");
     if ((facts.employment_months ?? 999) < 6 && !warnings.includes("short_job_time")) warnings.push("short_job_time");
@@ -1086,33 +1037,37 @@ export async function POST(req: Request) {
     if ((facts.down_payment ?? 999999) < 800 && facts.down_payment != null && !warnings.includes("low_down_payment")) warnings.push("low_down_payment");
     facts.warnings = warnings;
 
-    // ✅ Split scenario into 2 messages:
     if (nextTopic === "mechanical_failure_plan") {
+      const serverFacts: Facts = { ...facts };
       return NextResponse.json({
-        action: "ask" satisfies Action,
+        action: "ask" as Action,
         ack: "We all know vehicles don’t run forever and they have a funny way of surprising us when we least expect it.",
         explain: "",
         nextQuestion: questionFor(nextTopic, facts),
-        facts,
+        facts: serverFacts,
+        serverFacts,
       });
     }
 
+    const serverFacts: Facts = { ...facts };
     return NextResponse.json({
-      action: "ask" satisfies Action,
+      action: "ask" as Action,
       ack: ackFor(nextTopic),
       explain: "",
       nextQuestion: questionFor(nextTopic, facts),
-      facts,
+      facts: serverFacts,
+      serverFacts,
     });
   } catch (e: any) {
     console.error("chat/turn error:", e);
     return NextResponse.json(
       {
-        action: "ask" satisfies Action,
+        action: "ask" as Action,
         ack: "",
         explain: "",
         nextQuestion: "Something went wrong — please try again.",
         facts: {},
+        serverFacts: {},
       },
       { status: 500 }
     );

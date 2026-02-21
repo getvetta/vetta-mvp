@@ -1,6 +1,5 @@
 "use client";
 
-import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -10,8 +9,6 @@ type Msg = { role: Role; content: string; kind?: MsgKind };
 
 type Stage = "intro" | "chat" | "done";
 type Risk = "low" | "medium" | "high";
-
-type DealerQuestion = { id: string; question: string };
 
 type DealerPreferences = {
   min_down_payment: number;
@@ -30,7 +27,7 @@ type DealerPreferences = {
 const DEMO = "demo";
 const VEHICLE_TYPES = ["Sedan", "SUV", "Truck", "Van", "Coupe", "Hatchback", "Wagon", "Other"] as const;
 
-// ✅ Helper to prevent TS from widening literal types to string
+// ✅ Prevent TS from widening literal types to string
 const msg = (m: Msg) => m;
 
 /** Similarity / Dedup */
@@ -65,18 +62,20 @@ function memKey(assessmentId: string | null, dealerKey: string) {
 }
 
 /**
- * ✅ IMPORTANT:
- * This Facts type MUST match /app/api/chat/turn/route.ts exactly
+ * ✅ MUST match /app/api/chat/turn/route.ts
  */
 export type Facts = {
   // Income
   pay_frequency?: "weekly" | "biweekly" | "monthly" | null;
   income_amount?: number | null;
 
-  // Bills
-  rent_amount?: number | null;
-  cell_phone_bill?: number | null;
-  other_bills?: number | null;
+  // ✅ Derived (server may send)
+  income_monthly?: number | null;
+  bills_monthly?: number | null;
+
+  // Residence
+  residence_type?: "rent" | "own" | "family" | null;
+  residence_months?: number | null;
 
   // Employment
   job_title?: string | null;
@@ -84,39 +83,52 @@ export type Facts = {
   commute_minutes?: number | null;
   employment_months?: number | null;
 
-  // Residence
-  residence_type?: "rent" | "own" | "family" | null;
-  residence_months?: number | null;
-
   // License
   has_driver_license?: boolean | null;
   license_state_match?: boolean | null;
 
-  // Vehicle (from intro UI)
+  // Vehicle
   vehicle_type?: string | null;
   vehicle_specific?: string | null;
 
-  // Payments
-  payment_frequency?: "weekly" | "biweekly" | "monthly" | null;
+  // Bills (monthly)
+  rent_amount?: number | null;
+  cell_phone_bill?: number | null;
+  subscriptions_bill?: number | null;
+
+  water_bill?: number | null;
+  electric_bill?: number | null;
+  wifi_bill?: number | null;
+
+  // Food (weekly)
+  eat_out_frequency?: "never" | "1-2" | "3-5" | "6+" | null;
+  eat_out_spend_weekly?: number | null;
+  groceries_spend_weekly?: number | null;
+
+  // Down payment
   down_payment?: number | null;
 
-  // Credit + context (high weight)
+  // Credit + context
   credit_importance?: number | null;
   credit_below_reason?: string | null;
 
-  // Commitment & responsibility
+  // ✅ New intent/deal alignment fields
+  prior_auto_financing?: string | null;
+  vehicle_priority?: string | null;
+  bad_deal_definition?: string | null;
+  vehicle_benefit?: string | null;
+
+  // Scenario + support
   mechanical_failure_plan?: string | null;
   support_system?: boolean | null;
 
-  // Household
+  // Household / tie-in
   spouse_cosigner?: boolean | null;
-
-  // Location tie-in
   born_in_state?: boolean | null;
 
-  // Reference contact
-  reference_available?: boolean | null;
-  reference_relation?: string | null;
+  // Reference (matches route.ts)
+  vehicle_reference_available?: boolean | null;
+  vehicle_reference_relation?: string | null;
 
   // Flags
   warnings?: string[] | null;
@@ -140,7 +152,7 @@ function safeParseJSON<T>(s: string | null): T | null {
 }
 
 /**
- * ✅ API ROUTES (STANDARDIZED)
+ * ✅ API ROUTES
  */
 const API = {
   intro: "/api/assessments/intro",
@@ -152,8 +164,7 @@ export default function ChatbotPage() {
   const searchParams = useSearchParams();
 
   const assessmentId = searchParams.get("assessmentId");
-  const dealerParam = searchParams.get("dealer") || DEMO;
-  const dealerKey = dealerParam;
+  const dealerKey = (searchParams.get("dealer") || DEMO).trim() || DEMO;
 
   const [stage, setStage] = useState<Stage>("intro");
 
@@ -166,7 +177,6 @@ export default function ChatbotPage() {
   const [vehicleMenuOpen, setVehicleMenuOpen] = useState(false);
   const vehicleMenuRef = useRef<HTMLDivElement | null>(null);
 
-  const [dealerQs, setDealerQs] = useState<DealerQuestion[]>([]);
   const [prefs, setPrefs] = useState<DealerPreferences>({
     min_down_payment: 0,
     min_employment_months: 0,
@@ -203,16 +213,16 @@ export default function ChatbotPage() {
     function onDocClick(e: MouseEvent) {
       const el = vehicleMenuRef.current;
       if (!el) return;
-      if (vehicleMenuOpen && !el.contains(e.target as any)) setVehicleMenuOpen(false);
+      if (vehicleMenuOpen && !el.contains(e.target as Node)) setVehicleMenuOpen(false);
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [vehicleMenuOpen]);
 
-  /** Memory Load/Save */
+  /** Memory Load */
   useEffect(() => {
     const key = memKey(assessmentId, dealerKey);
-    const saved = safeParseJSON<SessionMemory>(typeof window !== "undefined" ? localStorage.getItem(key) : null);
+    const saved = safeParseJSON<SessionMemory>(localStorage.getItem(key));
 
     if (saved && Array.isArray(saved.asked)) setAsked(saved.asked);
     if (saved && saved.facts && typeof saved.facts === "object") {
@@ -225,6 +235,7 @@ export default function ChatbotPage() {
     }
   }, [assessmentId, dealerKey]);
 
+  /** Memory Save */
   useEffect(() => {
     const key = memKey(assessmentId, dealerKey);
     const payload: SessionMemory = {
@@ -252,21 +263,11 @@ export default function ChatbotPage() {
     }
   }, [stage, done]);
 
-  /** Load dealer custom questions + dealer settings */
+  /** Load dealer settings */
   useEffect(() => {
     const load = async () => {
       setLoadingDealerData(true);
       try {
-        const resQ = await fetch(`/api/custom-questions?dealer=${encodeURIComponent(dealerKey)}`);
-        const jsonQ = await resQ.json().catch(() => null);
-        const qs = Array.isArray(jsonQ?.questions) ? jsonQ.questions : [];
-
-        setDealerQs(
-          qs
-            .map((q: any) => ({ id: String(q.id ?? crypto.randomUUID()), question: String(q.question ?? "") }))
-            .filter((q: DealerQuestion) => q.question.trim().length > 0)
-        );
-
         const resS = await fetch(`/api/dealer-settings?dealer=${encodeURIComponent(dealerKey)}`);
         const jsonS = await resS.json().catch(() => null);
 
@@ -418,7 +419,6 @@ export default function ChatbotPage() {
     setStage("chat");
 
     persistProgress({ facts: initialFacts, answers: intro, status: "started" });
-
     router.refresh();
   };
 
@@ -450,7 +450,14 @@ export default function ChatbotPage() {
     const ack = String(json?.ack || "").trim();
     const explain = String(json?.explain || "").trim();
     const nextQuestion = String(json?.nextQuestion || "").trim();
-    const serverFacts = json?.facts && typeof json.facts === "object" ? (json.facts as Facts) : null;
+
+    // ✅ Prefer json.serverFacts (new), fallback json.facts (older)
+    const serverFacts =
+      json?.serverFacts && typeof json.serverFacts === "object"
+        ? (json.serverFacts as Facts)
+        : json?.facts && typeof json.facts === "object"
+        ? (json.facts as Facts)
+        : null;
 
     return { action, ack, explain, nextQuestion, serverFacts };
   }
@@ -515,17 +522,15 @@ export default function ChatbotPage() {
         lastQuestionAsked: lastQ,
       });
 
+      // ✅ FIX: apply serverFacts properly
       if (server.serverFacts) setFacts(server.serverFacts);
       if (awaitingFirstReply) setAwaitingFirstReply(false);
 
       if (server.action === "stop") {
-        const updated: Msg[] = [
-          ...chatAfterUser,
-          msg({ role: "assistant", kind: "sys", content: server.nextQuestion || "Assessment ended." }),
-        ];
+        const updated: Msg[] = [...chatAfterUser, msg({ role: "assistant", kind: "sys", content: server.nextQuestion || "Assessment ended." })];
         setMessages(updated);
-        persistProgress({ facts: server.serverFacts ?? facts, answers: updated, status: "completed" });
 
+        persistProgress({ facts: server.serverFacts ?? facts, answers: updated, status: "completed" });
         setDone(true);
         setStage("done");
         return;
@@ -537,23 +542,13 @@ export default function ChatbotPage() {
         setMessages((m) => {
           const out: Msg[] = [...m];
 
-          if (server.action === "clarify" && server.explain) {
-            const mm = msg({ role: "assistant", kind: "clarify", content: server.explain });
-            out.push(mm);
-          }
+          if (server.action === "clarify" && server.explain) out.push(msg({ role: "assistant", kind: "clarify", content: server.explain }));
+          if (server.action !== "clarify" && server.ack && server.ack.length <= 40) out.push(msg({ role: "assistant", kind: "ack", content: server.ack }));
 
-          if (server.action !== "clarify" && server.ack && server.ack.length <= 40) {
-            const mm = msg({ role: "assistant", kind: "ack", content: server.ack });
-            out.push(mm);
-          }
-
-          const q = msg({ role: "assistant", kind: "q", content: server.nextQuestion });
-          out.push(q);
-
+          out.push(msg({ role: "assistant", kind: "q", content: server.nextQuestion }));
           return out;
         });
 
-        // build preview in the same typed way for persist
         if (server.action === "clarify" && server.explain) preview.push(msg({ role: "assistant", kind: "clarify", content: server.explain }));
         if (server.action !== "clarify" && server.ack && server.ack.length <= 40) preview.push(msg({ role: "assistant", kind: "ack", content: server.ack }));
         preview.push(msg({ role: "assistant", kind: "q", content: server.nextQuestion }));
@@ -574,7 +569,7 @@ export default function ChatbotPage() {
     }
   };
 
-  /** Progress */
+  /** Progress (matches your route flow) */
   const progressPct = useMemo(() => {
     const filled = [
       facts.job_title,
@@ -587,8 +582,8 @@ export default function ChatbotPage() {
 
       facts.has_driver_license != null,
       facts.license_state_match != null,
-      facts.born_in_state != null,
 
+      facts.born_in_state != null,
       facts.spouse_cosigner != null,
 
       facts.pay_frequency,
@@ -596,22 +591,35 @@ export default function ChatbotPage() {
 
       facts.rent_amount != null,
       facts.cell_phone_bill != null,
-      facts.other_bills != null,
+      facts.subscriptions_bill != null,
 
-      facts.payment_frequency,
+      // utilities are conditional on residence_type !== family (server handles skipping, we just count if present)
+      facts.water_bill != null || facts.residence_type === "family",
+      facts.electric_bill != null || facts.residence_type === "family",
+      facts.wifi_bill != null || facts.residence_type === "family",
+
+      facts.eat_out_frequency,
+      facts.eat_out_spend_weekly != null || facts.eat_out_frequency === "never",
+      facts.groceries_spend_weekly != null || (facts.eat_out_frequency && facts.eat_out_frequency !== "never"),
+
       facts.down_payment != null,
 
       facts.credit_importance != null,
       facts.credit_below_reason,
 
+      facts.prior_auto_financing,
+      facts.vehicle_priority,
+      facts.bad_deal_definition,
+      facts.vehicle_benefit,
+
       facts.mechanical_failure_plan,
       facts.support_system != null,
 
-      facts.reference_available != null,
-      facts.reference_available ? Boolean(String(facts.reference_relation ?? "").trim()) : true,
+      facts.vehicle_reference_available != null,
+      facts.vehicle_reference_available === false ? true : Boolean(String(facts.vehicle_reference_relation ?? "").trim()),
     ].filter(Boolean).length;
 
-    const total = 23;
+    const total = 34; // number of checks above
     return Math.max(0, Math.min(100, Math.round((filled / total) * 100)));
   }, [facts]);
 
