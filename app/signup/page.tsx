@@ -14,25 +14,48 @@ export default function SignUpPage() {
     setMsg(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        emailRedirectTo:
-          typeof window !== "undefined"
-            ? `${window.location.origin}/signin`
-            : undefined,
-      },
-    });
+    try {
+      if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+        setMsg("Missing NEXT_PUBLIC_SUPABASE_URL");
+        setLoading(false);
+        return;
+      }
 
-    setLoading(false);
+      if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        setMsg("Missing NEXT_PUBLIC_SUPABASE_ANON_KEY");
+        setLoading(false);
+        return;
+      }
 
-    if (error) {
-      setMsg(error.message);
-      return;
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
+
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          emailRedirectTo: `${origin}/signin`,
+        },
+      });
+
+      if (error) {
+        setMsg(error.message);
+        setLoading(false);
+        return;
+      }
+
+      if (!data.user) {
+        setMsg("Signup succeeded but no user returned.");
+        setLoading(false);
+        return;
+      }
+
+      setMsg("Check your email to confirm, then sign in.");
+    } catch (err: any) {
+      setMsg(err?.message || "Network error: Failed to fetch.");
+    } finally {
+      setLoading(false);
     }
-
-    setMsg("Check your email to confirm, then sign in.");
   };
 
   return (

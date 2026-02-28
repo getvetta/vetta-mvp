@@ -14,18 +14,23 @@ type Assessment = {
   customer_name: string | null;
   customer_phone: string | null;
 
-  status: string | null; // started, completed, etc.
-  mode: string | null; // device/link
+  status: string | null;
+  mode: string | null;
   flow: string | null;
 
-  risk_score: string | null; // low/medium/high/pending
+  risk_score: string | null;
   reasoning?: string | null;
 
-  facts?: any | null; // jsonb (optional)
+  // ✅ NEW: clean UI fields
+  result_summary?: string | null;
+  pros?: string[] | null;
+  cons?: string[] | null;
+
+  facts?: any | null;
   vehicle_type?: string | null;
   vehicle_specific?: string | null;
 
-  answers?: any | null; // transcript (optional jsonb)
+  answers?: any | null;
 };
 
 function prettyRisk(risk: string | null) {
@@ -68,10 +73,6 @@ function safeArray<T>(v: any): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
 }
 
-/**
- * ✅ FIXED:
- * Force strict role typing so TS doesn't widen role to `string`.
- */
 function getTranscript(a: Assessment): Msg[] {
   const arr = safeArray<any>(a.answers);
 
@@ -214,22 +215,26 @@ export default function AssessmentDetailPage() {
 
     const billsParsed =
       parseMoneyFromReasoning(reasoning, "Bills (rent + phone + other)") ??
-      parseMoneyFromReasoning(reasoning, "Bills (rent + phone + other):") ??
       parseMoneyFromReasoning(reasoning, "Bills");
 
-    const bills =
-      Number.isFinite(billsFacts) && billsFacts >= 0
-        ? billsFacts
-        : billsParsed;
+    const bills = Number.isFinite(billsFacts) && billsFacts >= 0 ? billsFacts : billsParsed;
 
     const bti = calcBTI(income ?? null, bills ?? null);
 
-    return {
-      income,
-      bills,
-      bti,
-    };
+    return { income, bills, bti };
   }, [facts, row?.reasoning, row]);
+
+  const summaryBlock = useMemo(() => {
+    const summary = String(row?.result_summary || "").trim();
+    const pros = safeArray<string>(row?.pros).filter(Boolean);
+    const cons = safeArray<string>(row?.cons).filter(Boolean);
+
+    return {
+      summary: summary || null,
+      pros: pros.length ? pros.slice(0, 2) : null,
+      cons: cons.length ? cons.slice(0, 2) : null,
+    };
+  }, [row]);
 
   if (loading) {
     return (
@@ -287,9 +292,7 @@ export default function AssessmentDetailPage() {
                 <div className="text-2xl font-bold text-neutral-100">
                   {row.customer_name || "Customer"}
                 </div>
-                {row.customer_phone ? (
-                  <div className="text-sm text-neutral-300">{row.customer_phone}</div>
-                ) : null}
+                {row.customer_phone ? <div className="text-sm text-neutral-300">{row.customer_phone}</div> : null}
                 {vehicleSummary ? (
                   <div className="mt-2 text-sm text-neutral-300">
                     <span className="text-neutral-400">Vehicle:</span>{" "}
@@ -357,14 +360,23 @@ export default function AssessmentDetailPage() {
             </div>
           </div>
 
+          {/* ✅ Result Summary — keep only the big Details (perfect like your 2nd pic) */}
           <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur shadow-soft overflow-hidden">
             <div className="p-5 border-b border-white/10 font-semibold">Result Summary</div>
-            <div className="p-5">
+
+            <div className="p-5 space-y-5">
+              {/* IMPORTANT: no top Pros/Cons boxes at all */}
+
               {row.reasoning ? (
-                <pre className="text-sm text-neutral-200 whitespace-pre-wrap leading-6">{row.reasoning}</pre>
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="text-xs text-neutral-400 mb-2">Details</div>
+                  <pre className="text-sm text-neutral-200 whitespace-pre-wrap leading-6">
+                    {row.reasoning}
+                  </pre>
+                </div>
               ) : (
                 <div className="text-sm text-neutral-300">
-                  No reasoning saved yet. If the assessment is still in progress, this is normal.
+                  No results saved yet. If the assessment is still in progress, this is normal.
                 </div>
               )}
             </div>

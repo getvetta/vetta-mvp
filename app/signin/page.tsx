@@ -2,9 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
 
 export default function SignInPage() {
+  const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -14,19 +17,43 @@ export default function SignInPage() {
     setMsg(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    try {
+      // DEBUG CHECK: makes env problems obvious
+      if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+        setMsg("Missing NEXT_PUBLIC_SUPABASE_URL");
+        setLoading(false);
+        return;
+      }
 
-    setLoading(false);
+      if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        setMsg("Missing NEXT_PUBLIC_SUPABASE_ANON_KEY");
+        setLoading(false);
+        return;
+      }
 
-    if (error) {
-      setMsg(error.message);
-      return;
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        setMsg(error.message);
+        setLoading(false);
+        return;
+      }
+
+      if (!data.session) {
+        setMsg("No session returned after sign in.");
+        setLoading(false);
+        return;
+      }
+
+      router.push("/dashboard");
+    } catch (err: any) {
+      setMsg(err?.message || "Network error: Failed to fetch.");
+    } finally {
+      setLoading(false);
     }
-
-    window.location.href = "/dashboard";
   };
 
   return (

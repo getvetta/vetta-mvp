@@ -274,7 +274,8 @@ function parseYesNo(textRaw: string): boolean | null {
 function parsePayFrequency(textRaw: string): Facts["pay_frequency"] | null {
   const t = normalize(textRaw);
   if (t.includes("weekly") || /\bweek\b/.test(t)) return "weekly";
-  if (t.includes("biweekly") || t.includes("bi weekly") || t.includes("every two weeks") || t.includes("2 weeks")) return "biweekly";
+  if (t.includes("biweekly") || t.includes("bi weekly") || t.includes("every two weeks") || t.includes("2 weeks"))
+    return "biweekly";
   if (t.includes("monthly") || /\bmonth\b/.test(t)) return "monthly";
   return null;
 }
@@ -342,7 +343,7 @@ function addJobSignalsToWarnings(facts: Facts) {
   facts.warnings = Array.from(warnings);
 }
 
-function questionFor(topic: Topic, facts: Facts) {
+function questionFor(topic: Topic) {
   switch (topic) {
     case "job_title":
       return "What’s your current job title?";
@@ -931,7 +932,7 @@ function deriveAffordability(facts: Facts) {
 
   const eatOutWeekly = Number.isFinite(Number(facts.eat_out_spend_weekly)) ? Number(facts.eat_out_spend_weekly) : 0;
   const groceriesWeekly = Number.isFinite(Number(facts.groceries_spend_weekly)) ? Number(facts.groceries_spend_weekly) : 0;
-  const foodMonthly = (eatOutWeekly + groceriesWeekly) * 4.33; // avg weeks per month
+  const foodMonthly = (eatOutWeekly + groceriesWeekly) * 4.33;
 
   const billsMonthly = baseBills + foodMonthly;
 
@@ -970,7 +971,7 @@ export async function POST(req: Request) {
     let lastTopic: Topic | null = null;
     if (lastQ) {
       for (const t of FLOW) {
-        if (questionFor(t, facts) === lastQ) {
+        if (questionFor(t) === lastQ) {
           lastTopic = t;
           break;
         }
@@ -984,7 +985,7 @@ export async function POST(req: Request) {
         action: "clarify" as Action,
         ack: "",
         explain: clarifyExplain(lastTopic),
-        nextQuestion: questionFor(lastTopic, facts),
+        nextQuestion: questionFor(lastTopic),
         facts: serverFacts,
         serverFacts,
       });
@@ -999,7 +1000,7 @@ export async function POST(req: Request) {
           action: "clarify" as Action,
           ack: "",
           explain: clarifyExplain(lastTopic),
-          nextQuestion: questionFor(lastTopic, facts),
+          nextQuestion: questionFor(lastTopic),
           facts: serverFacts,
           serverFacts,
         });
@@ -1018,7 +1019,34 @@ export async function POST(req: Request) {
 
     const nextTopic = nextMissingTopic(facts);
 
+    // ✅ FLOW COMPLETE → Trigger analyze-risk
     if (!nextTopic) {
+      const assessmentId = String(body.assessmentId || "").trim();
+
+      // Fire-and-wait so you KNOW it wrote before dashboard loads
+      if (assessmentId) {
+        try {
+          const url = new URL("/api/analyze-risk", req.url);
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              assessmentId,
+              memory: { facts },
+            }),
+          });
+
+          if (!res.ok) {
+            const txt = await res.text().catch(() => "");
+            console.error("analyze-risk failed:", res.status, txt);
+          }
+        } catch (err) {
+          console.error("analyze-risk call error:", err);
+        }
+      } else {
+        console.error("Missing assessmentId: cannot run analyze-risk");
+      }
+
       const serverFacts: Facts = { ...facts };
       return NextResponse.json({
         action: "stop" as Action,
@@ -1043,7 +1071,7 @@ export async function POST(req: Request) {
         action: "ask" as Action,
         ack: "We all know vehicles don’t run forever and they have a funny way of surprising us when we least expect it.",
         explain: "",
-        nextQuestion: questionFor(nextTopic, facts),
+        nextQuestion: questionFor(nextTopic),
         facts: serverFacts,
         serverFacts,
       });
@@ -1054,7 +1082,7 @@ export async function POST(req: Request) {
       action: "ask" as Action,
       ack: ackFor(nextTopic),
       explain: "",
-      nextQuestion: questionFor(nextTopic, facts),
+      nextQuestion: questionFor(nextTopic),
       facts: serverFacts,
       serverFacts,
     });

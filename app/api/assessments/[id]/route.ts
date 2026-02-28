@@ -5,21 +5,27 @@ import { supabaseAdmin } from "@/utils/supabaseAdmin";
 async function getUserIdFromAuth(req: Request) {
   const auth = req.headers.get("authorization") || req.headers.get("Authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (!token) return { userId: null, error: "Missing auth token”" };
+  if (!token) return { userId: null as string | null, error: "Missing auth token" };
 
   const { data, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !data?.user) return { userId: null, error: "Not authenticated" };
+  if (error || !data?.user) return { userId: null as string | null, error: "Not authenticated" };
 
-  return { userId: data.user.id, error: null };
+  return { userId: data.user.id as string, error: null as string | null };
 }
 
 async function getDealerIdForUser(userId: string) {
-  const { data, error } = await supabaseAdmin.from("profiles").select("dealer_id").eq("id", userId).maybeSingle();
-  if (error) return { dealerId: null, error: error.message };
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("dealer_id")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) return { dealerId: null as string | null, error: error.message };
 
   const dealerId = (data as any)?.dealer_id ? String((data as any).dealer_id) : null;
-  if (!dealerId) return { dealerId: null, error: "profiles.dealer_id missing for this user" };
-  return { dealerId, error: null };
+  if (!dealerId) return { dealerId: null as string | null, error: "profiles.dealer_id missing for this user" };
+
+  return { dealerId, error: null as string | null };
 }
 
 function isMissingColumn(err: any, columnName: string) {
@@ -27,25 +33,39 @@ function isMissingColumn(err: any, columnName: string) {
   return msg.includes("does not exist") && msg.includes("column") && msg.includes(columnName.toLowerCase());
 }
 
-export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
+function isAnyMissingColumn(err: any) {
+  const msg = String(err?.message || "").toLowerCase();
+  return msg.includes("does not exist") && msg.includes("column");
+}
+
+// ✅ Next.js v15 fix: destructure params in the signature
+export async function GET(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
   try {
-    const { id } = await ctx.params;
-    const assessmentId = String(id || "").trim();
-    if (!assessmentId) return NextResponse.json({ error: "Missing assessment id" }, { status: 400 });
+    const assessmentId = String(params?.id || "").trim();
+    if (!assessmentId) {
+      return NextResponse.json({ error: "Missing assessment id" }, { status: 400 });
+    }
 
     const { userId, error: authErr } = await getUserIdFromAuth(req);
-    if (!userId) return NextResponse.json({ error: authErr || "Unauthorized" }, { status: 401 });
+    if (!userId) {
+      return NextResponse.json({ error: authErr || "Unauthorized" }, { status: 401 });
+    }
 
     const { dealerId, error: dealerErr } = await getDealerIdForUser(userId);
-    if (!dealerId) return NextResponse.json({ error: dealerErr || "Dealer mapping missing" }, { status: 400 });
+    if (!dealerId) {
+      return NextResponse.json({ error: dealerErr || "Dealer mapping missing" }, { status: 400 });
+    }
 
     const selectNew =
-      "id, created_at, customer_name, customer_phone, status, mode, flow, risk_score, reasoning, facts, vehicle_type, vehicle_specific, answers";
+      "id, created_at, customer_name, customer_phone, status, mode, flow, risk_score, reasoning, facts, vehicle_type, vehicle_specific, answers, result_summary, pros, cons";
 
     const selectOld =
       "id, created_at, customer_name, customer_phone, status, mode, flow, risk_score, reasoning";
 
-    // Try NEW select first using dealer_id
+    // Try: dealer_id
     let attempt = await supabaseAdmin
       .from("assessments")
       .select(selectNew)
@@ -53,7 +73,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       .eq("dealer_id", dealerId)
       .maybeSingle();
 
-    // Only fallback to dealership_id if dealer_id column truly missing
+    // Fallback: dealership_id if dealer_id column doesn't exist
     if (attempt.error && isMissingColumn(attempt.error, "dealer_id")) {
       attempt = await supabaseAdmin
         .from("assessments")
@@ -63,8 +83,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
         .maybeSingle();
     }
 
-    // If selectNew fails due to missing facts/answers columns, retry old select
-    if (attempt.error && String(attempt.error.message || "").toLowerCase().includes("column")) {
+    // If any of the "new fields" are missing, fallback to old select
+    if (attempt.error && isAnyMissingColumn(attempt.error)) {
       let attemptOld = await supabaseAdmin
         .from("assessments")
         .select(selectOld)
@@ -81,14 +101,22 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
           .maybeSingle();
       }
 
-      if (attemptOld.error) return NextResponse.json({ error: attemptOld.error.message }, { status: 500 });
-      if (!attemptOld.data) return NextResponse.json({ error: "Assessment not found" }, { status: 404 });
+      if (attemptOld.error) {
+        return NextResponse.json({ error: attemptOld.error.message }, { status: 500 });
+      }
+      if (!attemptOld.data) {
+        return NextResponse.json({ error: "Assessment not found" }, { status: 404 });
+      }
 
       return NextResponse.json({ ok: true, assessment: attemptOld.data });
     }
 
-    if (attempt.error) return NextResponse.json({ error: attempt.error.message }, { status: 500 });
-    if (!attempt.data) return NextResponse.json({ error: "Assessment not found" }, { status: 404 });
+    if (attempt.error) {
+      return NextResponse.json({ error: attempt.error.message }, { status: 500 });
+    }
+    if (!attempt.data) {
+      return NextResponse.json({ error: "Assessment not found" }, { status: 404 });
+    }
 
     return NextResponse.json({ ok: true, assessment: attempt.data });
   } catch (e: any) {

@@ -219,24 +219,35 @@ export default function ChatbotPage() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [vehicleMenuOpen]);
 
-  /** Memory Load */
+  /** Memory Load ✅ (fixed: window.localStorage + guard) */
   useEffect(() => {
-    const key = memKey(assessmentId, dealerKey);
-    const saved = safeParseJSON<SessionMemory>(localStorage.getItem(key));
+    if (typeof window === "undefined") return;
 
-    if (saved && Array.isArray(saved.asked)) setAsked(saved.asked);
-    if (saved && saved.facts && typeof saved.facts === "object") {
-      setFacts(saved.facts);
-      if (saved.facts.vehicle_type) setVehicleType(saved.facts.vehicle_type);
-      if (saved.facts.vehicle_specific) setVehicleSpecific(saved.facts.vehicle_specific);
-    }
-    if (saved && typeof saved.lastQuestionAsked === "string") {
-      lastQuestionAskedRef.current = saved.lastQuestionAsked;
+    const key = memKey(assessmentId, dealerKey);
+
+    try {
+      const saved = safeParseJSON<SessionMemory>(window.localStorage.getItem(key));
+
+      if (saved && Array.isArray(saved.asked)) setAsked(saved.asked);
+
+      if (saved && saved.facts && typeof saved.facts === "object") {
+        setFacts(saved.facts);
+        if (saved.facts.vehicle_type) setVehicleType(saved.facts.vehicle_type);
+        if (saved.facts.vehicle_specific) setVehicleSpecific(saved.facts.vehicle_specific);
+      }
+
+      if (saved && typeof saved.lastQuestionAsked === "string") {
+        lastQuestionAskedRef.current = saved.lastQuestionAsked;
+      }
+    } catch {
+      // ignore (privacy mode, disabled storage, etc.)
     }
   }, [assessmentId, dealerKey]);
 
-  /** Memory Save */
+  /** Memory Save ✅ (fixed: window.localStorage + guard) */
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
     const key = memKey(assessmentId, dealerKey);
     const payload: SessionMemory = {
       asked,
@@ -244,8 +255,9 @@ export default function ChatbotPage() {
       lastQuestionAsked: lastQuestionAskedRef.current,
       lastUpdated: Date.now(),
     };
+
     try {
-      localStorage.setItem(key, JSON.stringify(payload));
+      window.localStorage.setItem(key, JSON.stringify(payload));
     } catch {
       // ignore
     }
@@ -311,12 +323,15 @@ export default function ChatbotPage() {
     load();
   }, [dealerKey]);
 
-  /** Restart */
+  /** Restart ✅ (fixed: window.localStorage + guard) */
   const restartAssessment = () => {
     const key = memKey(assessmentId, dealerKey);
-    try {
-      localStorage.removeItem(key);
-    } catch {}
+
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {}
+    }
 
     setMessages([]);
     setAsked([]);

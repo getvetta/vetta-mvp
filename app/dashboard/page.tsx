@@ -193,11 +193,10 @@ export default function DashboardPage() {
     setLoading(true);
     setErrorMsg(null);
 
-    const attempt1 = await supabase
-      .from("assessments")
-      .select("id, created_at, customer_name, customer_phone, status, mode, flow, risk_score, reasoning, facts, vehicle_type, vehicle_specific")
-      .eq("dealer_id", dId)
-      .order("created_at", { ascending: false });
+    const fieldsNew =
+      "id, created_at, customer_name, customer_phone, status, mode, flow, risk_score, reasoning, facts, vehicle_type, vehicle_specific";
+
+    const attempt1 = await supabase.from("assessments").select(fieldsNew).eq("dealer_id", dId).order("created_at", { ascending: false });
 
     if (!attempt1.error) {
       setAssessments((attempt1.data as any) || []);
@@ -205,11 +204,12 @@ export default function DashboardPage() {
       return;
     }
 
+    // ✅ FIX: avoid TS “excessively deep” by casting the *client* to any for legacy column fallback
     if (isMissingColumnError(String(attempt1.error.message || ""))) {
-      const attempt2 = await supabase
+      const attempt2 = await (supabase as any)
         .from("assessments")
-        .select("id, created_at, customer_name, customer_phone, status, mode, flow, risk_score, reasoning, facts, vehicle_type, vehicle_specific")
-        .eq("dealership_id" as any, dId)
+        .select(fieldsNew)
+        .eq("dealership_id", dId)
         .order("created_at", { ascending: false });
 
       if (!attempt2.error) {
@@ -356,7 +356,7 @@ export default function DashboardPage() {
 
       setQrUrl(url);
       setQrAssessmentId("Created after customer submits info");
-      setQrPngDataUrl(""); // will be populated after canvas renders
+      setQrPngDataUrl("");
       setQrModalOpen(true);
     } catch (e: any) {
       setErrorMsg(e?.message || "Could not generate QR");
@@ -704,7 +704,6 @@ export default function DashboardPage() {
                       includeMargin
                       level="M"
                       ref={(node) => {
-                        // qrcode.react ref gives canvas element
                         qrCanvasRef.current = node as unknown as HTMLCanvasElement | null;
                       }}
                     />
@@ -750,8 +749,6 @@ export default function DashboardPage() {
 
               <button
                 onClick={() => {
-                  // Ensure print has an <img> if you want it (optional)
-                  // Currently print uses the HTML inside printRef (canvas prints fine in most browsers)
                   printQr();
                 }}
                 className="h-11 px-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-100"
@@ -760,7 +757,6 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            {/* Optional: if you want a PNG preview/backup */}
             {qrPngDataUrl ? (
               <div className="mt-3 text-xs text-neutral-500">
                 QR PNG ready (for printing reliability).{" "}
