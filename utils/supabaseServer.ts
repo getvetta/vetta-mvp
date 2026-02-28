@@ -1,9 +1,10 @@
 // utils/supabaseServer.ts
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
 
-export function supabaseServer() {
-  const cookieStore = cookies();
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+
+export async function createSupabaseServerClient() {
+  const cookieStore = await cookies(); // ✅ MUST await in Next 15
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,13 +16,11 @@ export function supabaseServer() {
         },
         setAll(cookiesToSet) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
           } catch {
-            // If called from a Server Component where cookies are read-only,
-            // Supabase may try to set cookies and Next will throw.
-            // It's safe to ignore in that case.
+            // Ignore if called in a Server Component
           }
         },
       },
