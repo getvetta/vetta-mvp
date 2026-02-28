@@ -1,19 +1,30 @@
 // utils/supabaseServer.ts
-import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
 export function supabaseServer() {
   const cookieStore = cookies();
 
-  return createClient(
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
-        }
-      }
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // If called from a Server Component where cookies are read-only,
+            // Supabase may try to set cookies and Next will throw.
+            // It's safe to ignore in that case.
+          }
+        },
+      },
     }
   );
 }
