@@ -1,3 +1,4 @@
+// app/dashboard/assessment/[id]/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -59,7 +60,7 @@ function statusBadge(status: string | null) {
   if (!s) return "bg-white/5 text-neutral-300 border border-white/10";
   if (s === "completed") return "bg-emerald-500/15 text-emerald-200 border border-emerald-500/25";
   if (s === "started" || s === "in_progress") return "bg-brand-500/15 text-brand-200 border border-brand-500/25";
-  if (s === "locked") return "bg-red-500/15 text-red-200 border border-red-500/25";
+  if (s === "locked") return "bg-red-500/15 text-red-200 border border-brand-500/25";
   return "bg-white/5 text-neutral-300 border border-white/10";
 }
 
@@ -109,7 +110,10 @@ function calcBTI(income: number | null, bills: number | null) {
 export default function AssessmentDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const id = String((params as any)?.id || "").trim();
+
+  // ✅ Robust param parsing (handles array params too)
+  const rawId = (params as any)?.id;
+  const id = Array.isArray(rawId) ? rawId[0] : String(rawId || "").trim();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,6 +124,13 @@ export default function AssessmentDetailPage() {
     try {
       setLoading(true);
       setError(null);
+
+      // ✅ Guard: never fetch without an id
+      if (!id) {
+        setError("Missing assessment id");
+        setRow(null);
+        return;
+      }
 
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
@@ -169,6 +180,11 @@ export default function AssessmentDetailPage() {
       setDeleting(true);
       setError(null);
 
+      if (!id) {
+        setError("Missing assessment id");
+        return;
+      }
+
       const { error: delErr } = await supabase.from("assessments").delete().eq("id", id);
 
       if (delErr) {
@@ -185,7 +201,11 @@ export default function AssessmentDetailPage() {
   }
 
   useEffect(() => {
-    if (!id) return;
+    if (!id) {
+      setLoading(false);
+      setError("Missing assessment id");
+      return;
+    }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -289,9 +309,7 @@ export default function AssessmentDetailPage() {
             <div className="p-5 border-b border-white/10 flex items-start justify-between gap-3">
               <div>
                 <div className="text-xs text-neutral-400">Applicant</div>
-                <div className="text-2xl font-bold text-neutral-100">
-                  {row.customer_name || "Customer"}
-                </div>
+                <div className="text-2xl font-bold text-neutral-100">{row.customer_name || "Customer"}</div>
                 {row.customer_phone ? <div className="text-sm text-neutral-300">{row.customer_phone}</div> : null}
                 {vehicleSummary ? (
                   <div className="mt-2 text-sm text-neutral-300">
@@ -342,10 +360,7 @@ export default function AssessmentDetailPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={downloadJSON}
-                  className="h-11 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium"
-                >
+                <button onClick={downloadJSON} className="h-11 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium">
                   Download JSON
                 </button>
 
@@ -360,19 +375,15 @@ export default function AssessmentDetailPage() {
             </div>
           </div>
 
-          {/* ✅ Result Summary — keep only the big Details (perfect like your 2nd pic) */}
+          {/* ✅ Result Summary — keep only Details */}
           <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur shadow-soft overflow-hidden">
             <div className="p-5 border-b border-white/10 font-semibold">Result Summary</div>
 
             <div className="p-5 space-y-5">
-              {/* IMPORTANT: no top Pros/Cons boxes at all */}
-
               {row.reasoning ? (
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
                   <div className="text-xs text-neutral-400 mb-2">Details</div>
-                  <pre className="text-sm text-neutral-200 whitespace-pre-wrap leading-6">
-                    {row.reasoning}
-                  </pre>
+                  <pre className="text-sm text-neutral-200 whitespace-pre-wrap leading-6">{row.reasoning}</pre>
                 </div>
               ) : (
                 <div className="text-sm text-neutral-300">

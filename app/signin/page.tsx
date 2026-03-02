@@ -1,13 +1,11 @@
+// app/signin/page.tsx
 "use client";
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
 
 export default function SignInPage() {
-  const router = useRouter();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -17,98 +15,78 @@ export default function SignInPage() {
     setMsg(null);
     setLoading(true);
 
-    try {
-      // DEBUG CHECK: makes env problems obvious
-      if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-        setMsg("Missing NEXT_PUBLIC_SUPABASE_URL");
-        setLoading(false);
-        return;
-      }
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
 
-      if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-        setMsg("Missing NEXT_PUBLIC_SUPABASE_ANON_KEY");
-        setLoading(false);
-        return;
-      }
+    setLoading(false);
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-
-      if (error) {
-        setMsg(error.message);
-        setLoading(false);
-        return;
-      }
-
-      if (!data.session) {
-        setMsg("No session returned after sign in.");
-        setLoading(false);
-        return;
-      }
-
-      router.push("/dashboard");
-    } catch (err: any) {
-      setMsg(err?.message || "Network error: Failed to fetch.");
-    } finally {
-      setLoading(false);
+    if (error) {
+      setMsg(error.message);
+      return;
     }
+
+    window.location.href = "/dashboard";
   };
 
   return (
     <main className="min-h-screen flex items-center justify-center px-4 py-10 bg-neutral-950 text-neutral-100">
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-6 shadow-soft">
+        <h1 className="text-xl font-semibold">Dealer Sign In</h1>
+        <p className="mt-2 text-sm text-neutral-300">Log in to view assessments and AI risk results.</p>
 
-        <h1 className="text-2xl font-extrabold tracking-tight text-brand-200 mb-2">
-          Dealer Sign In
-        </h1>
-
-        <p className="text-sm text-neutral-400 mb-4">
-          Log in to view assessments and AI risk results.
-        </p>
-
-        {msg && (
-          <div className="mb-3 rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-            {msg}
-          </div>
-        )}
-
-        <label className="text-xs mb-1 block">Email</label>
+        <label className="block mt-5 text-xs text-neutral-400">Email</label>
         <input
-          className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 mb-3 outline-none focus:ring-2 focus:ring-brand-500/40"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@dealership.com"
+          className="mt-2 w-full h-11 rounded-xl bg-neutral-950/40 border border-white/10 px-3 text-neutral-100 outline-none focus:border-brand-500"
         />
 
-        <label className="text-xs mb-1 block">Password</label>
+        <label className="block mt-4 text-xs text-neutral-400">Password</label>
         <input
-          type="password"
-          className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/40"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          type="password"
           placeholder="••••••••"
+          className="mt-2 w-full h-11 rounded-xl bg-neutral-950/40 border border-white/10 px-3 text-neutral-100 outline-none focus:border-brand-500"
         />
 
         <button
           onClick={signIn}
           disabled={loading}
-          className="mt-4 w-full h-11 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-70 font-medium"
+          className="mt-5 w-full h-11 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-70 text-white font-medium"
         >
           {loading ? "Signing in..." : "Sign In"}
         </button>
 
-        <div className="mt-4 text-sm text-neutral-400">
-          Don’t have access?{" "}
-          <Link href="/signup" className="text-brand-300 underline">
-            Request dealer account
+        <div className="mt-3 flex items-center justify-between text-sm">
+          <Link href="/forgot-password" className="text-brand-200 hover:underline">
+            Forgot password?
+          </Link>
+
+          <Link href="/signup" className="text-neutral-300 hover:text-neutral-100">
+            Sign up
           </Link>
         </div>
 
-        <div className="mt-3 text-xs text-neutral-500">
+        {msg ? (
+          <div className="mt-4 p-3 rounded-xl border border-red-500/25 bg-red-500/10 text-red-200 text-sm">
+            {msg}
+          </div>
+        ) : null}
+
+        <div className="mt-5 text-sm text-neutral-300">
+          Don’t have access?{" "}
+          <a className="text-brand-200 hover:underline" href="mailto:support@vetta.services">
+            Request dealer account
+          </a>
+        </div>
+
+        <div className="mt-2 text-sm text-neutral-300">
           Want to see customer flow?{" "}
-          <Link href="/chatbot?dealer=demo" className="text-brand-300 underline">
+          <Link className="text-brand-200 hover:underline" href="/chatbot?demo=1">
             Try demo assessment
           </Link>
         </div>

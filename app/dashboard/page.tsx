@@ -204,7 +204,6 @@ export default function DashboardPage() {
       return;
     }
 
-    // ✅ FIX: avoid TS “excessively deep” by casting the *client* to any for legacy column fallback
     if (isMissingColumnError(String(attempt1.error.message || ""))) {
       const attempt2 = await (supabase as any)
         .from("assessments")
@@ -305,7 +304,6 @@ export default function DashboardPage() {
     return `${window.location.origin}/chatbot?dealer=${encodeURIComponent(dealerKeyForUrl)}`;
   }
 
-  // ✅ Start on dealer device: create assessment ONLY, then redirect.
   async function startOnDealerDevice() {
     if (!dealerId) return;
 
@@ -344,7 +342,6 @@ export default function DashboardPage() {
     }
   }
 
-  // ✅ QR Code: /chatbot?dealer=...
   async function openQr() {
     if (!dealerId) return;
     setCreating(true);
@@ -365,7 +362,7 @@ export default function DashboardPage() {
     }
   }
 
-  // When modal opens and QR renders, grab PNG for printing
+  // capture PNG when modal opens (helps reliability)
   useEffect(() => {
     if (!qrModalOpen) return;
 
@@ -379,7 +376,7 @@ export default function DashboardPage() {
       } catch {
         // ignore
       }
-    }, 50);
+    }, 80);
 
     return () => clearTimeout(t);
   }, [qrModalOpen, qrUrl]);
@@ -389,11 +386,25 @@ export default function DashboardPage() {
     await navigator.clipboard.writeText(qrUrl);
   };
 
+  // ✅ FIXED PRINT: print IMG (PNG) instead of canvas HTML
   const printQr = () => {
-    const el = printRef.current;
-    if (!el) return;
+    let dataUrl = "";
+    try {
+      const canvas = qrCanvasRef.current;
+      if (canvas) dataUrl = canvas.toDataURL("image/png");
+    } catch {
+      dataUrl = "";
+    }
+
+    const finalPng = dataUrl || qrPngDataUrl;
+
+    if (!finalPng) {
+      alert("QR is still loading. Wait 1 second and press Print QR again.");
+      return;
+    }
 
     const safeDealer = (dealerName || "Dealer").replace(/[<>]/g, "");
+    const safeUrl = (qrUrl || "").replace(/[<>]/g, "");
 
     const html = `
 <!doctype html>
@@ -427,26 +438,59 @@ export default function DashboardPage() {
         padding: 6px 10px; border-radius: 999px; white-space: nowrap;
       }
       .subtitle { margin-top: 8px; font-size: 12px; color: #334155; }
-      .title { margin-top: 12px; font-size: 14px; font-weight: 900; letter-spacing: -0.01em; }
+      .title { margin-top: 12px; font-size: 14px; font-weight: 900; }
       .qrWrap { margin-top: 14px; display: flex; justify-content: center; padding: 10px 0; }
       .qrBox {
         width: 330px; height: 330px; border: 1px solid #e5e7eb; border-radius: 18px;
         padding: 14px; display:flex; align-items:center; justify-content:center; background: #ffffff;
       }
+      .qrBox img { width: 100%; height: auto; display: block; }
       .scan { margin-top: 10px; text-align: center; font-size: 11px; color: #475569; }
       .meta { margin-top: 14px; border-top: 1px solid #e5e7eb; padding-top: 12px; }
       .label { font-size: 10px; font-weight: 800; color: #475569; margin-top: 8px; text-transform: uppercase; letter-spacing: 0.06em; }
       .value { font-size: 11px; color: #0B1220; word-break: break-all; margin-top: 4px; }
       .note { margin-top: 10px; font-size: 11px; color: #64748b; }
-      .footer { margin-top: 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+      .footer { margin-top: 14px; display: flex; justify-content: space-between; align-items: center; }
       .powered { font-size: 11px; color: #64748b; }
       .brand { font-size: 11px; font-weight: 900; letter-spacing: 0.08em; }
     </style>
   </head>
   <body>
     <div class="sheet">
-      ${el.innerHTML}
+      <div class="card">
+        <div class="top">
+          <div class="dealer">${safeDealer}</div>
+          <div class="tag">Pre-Approval Screening</div>
+        </div>
+
+        <div class="subtitle">Vetta customer intake — scan the QR code to begin.</div>
+        <div class="title">Scan to begin your assessment</div>
+
+        <div class="qrWrap">
+          <div class="qrBox">
+            <img src="${finalPng}" alt="Vetta QR Code" />
+          </div>
+        </div>
+
+        <div class="scan">Use your phone camera to scan the code and follow the link.</div>
+
+        <div class="meta">
+          <div class="label">Backup URL</div>
+          <div class="value">${safeUrl || "—"}</div>
+
+          <div class="label">Assessment ID</div>
+          <div class="value">Created after customer submits info</div>
+
+          <div class="note">If the camera doesn’t auto-open, open the camera app and point it at the QR code (or type the backup URL).</div>
+
+          <div class="footer">
+            <div class="powered">Powered by Vetta</div>
+            <div class="brand">VETTA</div>
+          </div>
+        </div>
+      </div>
     </div>
+
     <script>window.onload = () => window.print();</script>
   </body>
 </html>
@@ -498,7 +542,9 @@ export default function DashboardPage() {
           <h1 className="text-xl font-semibold">Dealer Dashboard</h1>
           <p className="mt-2 text-sm text-neutral-300">You must be signed in to view the dashboard.</p>
           <Link href="/signin">
-            <button className="mt-5 h-11 px-6 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium">Go to Sign In</button>
+            <button className="mt-5 h-11 px-6 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium">
+              Go to Sign In
+            </button>
           </Link>
         </div>
       </main>
@@ -531,7 +577,9 @@ export default function DashboardPage() {
           </div>
 
           {errorMsg && (
-            <div className="mt-3 p-3 rounded-xl border border-amber-500/25 bg-amber-500/10 text-amber-200 text-sm">{errorMsg}</div>
+            <div className="mt-3 p-3 rounded-xl border border-amber-500/25 bg-amber-500/10 text-amber-200 text-sm">
+              {errorMsg}
+            </div>
           )}
 
           <div className="mt-4 text-xs text-neutral-400">
@@ -557,7 +605,9 @@ export default function DashboardPage() {
               <span className="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/25 text-emerald-200">
                 Completed: {totals.completed}
               </span>
-              <span className="px-3 py-1 rounded-full bg-brand-500/15 border border-brand-500/25 text-brand-200">In progress: {totals.pending}</span>
+              <span className="px-3 py-1 rounded-full bg-brand-500/15 border border-brand-500/25 text-brand-200">
+                In progress: {totals.pending}
+              </span>
             </div>
           </div>
 
@@ -644,7 +694,8 @@ export default function DashboardPage() {
                       </div>
 
                       <div className="flex flex-col sm:flex-row gap-2 lg:items-center">
-                        <Link href={`/dashboard/assessments/${a.id}`} className="w-full sm:w-auto">
+                        {/* ✅ correct route: /dashboard/assessment/[id] */}
+                        <Link href={`/dashboard/assessment/${a.id}`} className="w-full sm:w-auto">
                           <button className="h-11 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium w-full">View Details</button>
                         </Link>
 
@@ -740,19 +791,11 @@ export default function DashboardPage() {
                 Copy URL
               </button>
 
-              <button
-                onClick={() => window.open(qrUrl, "_blank")}
-                className="h-11 px-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-100"
-              >
+              <button onClick={() => window.open(qrUrl, "_blank")} className="h-11 px-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-100">
                 Open URL
               </button>
 
-              <button
-                onClick={() => {
-                  printQr();
-                }}
-                className="h-11 px-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-100"
-              >
+              <button onClick={printQr} className="h-11 px-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-100">
                 Print QR
               </button>
             </div>
